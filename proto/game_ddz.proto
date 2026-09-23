@@ -1,0 +1,65 @@
+syntax = "proto3";
+package pandora;
+
+// msg_id = 2001
+message S2C_DdzGameStart {
+  int32 seat_id = 1;
+  repeated int32 hand_cards = 2;
+  int32 landlord_seat = 3;
+  repeated int32 bottom_cards = 4;
+}
+
+// msg_id = 2002
+message S2C_DdzTurn {
+  int32 seat_id = 1;
+  string phase = 2;
+  int32 timeout_s = 3;
+}
+
+// msg_id = 2003
+message C2S_DdzBid {
+  int32 score = 1;
+}
+
+// msg_id = 2004
+message S2C_DdzBidBroadcast {
+  int32 seat_id = 1;
+  int32 score = 2;
+}
+
+// msg_id = 2005
+message C2S_DdzPlay {
+  bool pass = 1;
+  repeated int32 cards = 2;
+}
+
+// msg_id = 2006
+message S2C_DdzPlayBroadcast {
+  int32 seat_id = 1;
+  bool pass = 2;
+  repeated int32 cards = 3;
+  int32 cards_left = 4;
+}
+
+// msg_id = 2007
+message S2C_DdzSettle {
+  message Entry {
+    int64 uid = 1;
+    int32 seat_id = 2;
+    int64 delta_gold = 3;
+  }
+  int64 round_id = 1;
+  int32 base_score = 2;
+  int32 multiplier = 3;
+  repeated Entry entries = 4;
+}
+
+// msg_id = 2008
+message S2C_DdzReconnect {
+  int32 seat_id = 1;
+  string phase = 2;
+  repeated int32 hand_cards = 3;
+  int32 landlord_seat = 4;
+  int32 current_seat = 5;
+  int32 timeout_s = 6;
+}

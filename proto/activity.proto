@@ -1,0 +1,10 @@
+syntax = "proto3";
+package pandora;
+
+// msg_id = 3001
+message S2C_ActivityUpdate {
+  int32 activity_id = 1;
+  string type = 2;
+  string progress_json = 3;
+  bool claimable = 4;
+}

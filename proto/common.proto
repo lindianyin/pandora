@@ -1,0 +1,43 @@
+syntax = "proto3";
+package pandora;
+
+// msg_id = 1
+message C2S_Auth {
+  string token = 1;
+}
+
+// msg_id = 2
+message S2C_AuthResult {
+  int32 code = 1;
+  string message = 2;
+  int64 uid = 3;
+}
+
+// msg_id = 3
+message C2S_Heartbeat {
+  int64 client_time_ms = 1;
+}
+
+// msg_id = 4
+message S2C_HeartbeatAck {
+  int64 server_time_ms = 1;
+}
+
+// msg_id = 5
+message S2C_Kick {
+  int32 reason = 1;
+  string message = 2;
+}
+
+// msg_id = 6
+message S2C_Maintain {
+  bool enabled = 1;
+  string message = 2;
+}
+
+// msg_id = 7
+message S2C_Error {
+  int32 code = 1;
+  string message = 2;
+  uint32 ref_msg_id = 3;
+}

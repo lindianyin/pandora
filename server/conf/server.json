@@ -1,0 +1,48 @@
+{
+  "net": {
+    "http_host": "0.0.0.0",
+    "http_port": 8080,
+    "ws_host": "0.0.0.0",
+    "ws_port": 8081,
+    "tls": {
+      "enabled": false,
+      "cert": "certs/server.crt",
+      "key": "certs/server.key"
+    },
+    "max_frame_bytes": 1048576,
+    "heartbeat_interval_s": 15,
+    "heartbeat_timeout_s": 45
+  },
+  "store": {
+    "backend": "memory"
+  },
+  "mysql": {
+    "dsn": "host=127.0.0.1;port=3306;user=pandora;password=pandora;database=pandora",
+    "pool_size": 10
+  },
+  "redis": {
+    "uri": "redis://127.0.0.1:6379/0",
+    "pool_size": 10
+  },
+  "game": {
+    "base_score": 100,
+    "rake_bp": 500,
+    "bid_timeout_s": 15,
+    "play_timeout_s": 20,
+    "match_timeout_s": 30
+  },
+  "exchange": {
+    "diamond_to_gold": 1000
+  },
+  "alipay": {
+    "sandbox": true,
+    "app_id": "REPLACE",
+    "notify_url": "http://127.0.0.1:8080/api/v1/pay/alipay/notify",
+    "gateway": "https://openapi.alipay.com/gateway.do"
+  },
+  "worker": {
+    "biz_threads": 4,
+    "async_threads": 2
+  }
+}
+

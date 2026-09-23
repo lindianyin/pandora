@@ -1,0 +1,74 @@
+syntax = "proto3";
+package pandora;
+
+// msg_id = 1001
+message C2S_GetLobby {}
+
+// msg_id = 1002
+message S2C_LobbyInfo {
+  message Template {
+    int32 id = 1;
+    string name = 2;
+    int32 base_score = 3;
+    int64 min_gold = 4;
+    int64 max_gold = 5;
+    bool enabled = 6;
+  }
+  repeated Template templates = 1;
+  int64 gold = 2;
+  int64 diamond = 3;
+}
+
+// msg_id = 1010
+message C2S_QuickMatch {
+  int32 template_id = 1;
+}
+
+// msg_id = 1011
+message C2S_CancelMatch {}
+
+// msg_id = 1012
+message S2C_MatchStatus {
+  enum Status {
+    MATCHING = 0;
+    SUCCESS = 1;
+    TIMEOUT = 2;
+    CANCELLED = 3;
+  }
+  Status status = 1;
+  int64 room_id = 2;
+  string message = 3;
+}
+
+// msg_id = 1020
+message C2S_JoinRoom {
+  int64 room_id = 1;
+}
+
+// msg_id = 1021
+message C2S_LeaveRoom {}
+
+// msg_id = 1022
+message C2S_Ready {
+  bool ready = 1;
+}
+
+// msg_id = 1023
+message S2C_RoomState {
+  message Seat {
+    int32 seat_id = 1;
+    int64 uid = 2;
+    string nickname = 3;
+    bool ready = 4;
+    bool online = 5;
+  }
+  int64 room_id = 1;
+  int32 template_id = 2;
+  repeated Seat seats = 3;
+  string phase = 4;
+}
+
+// msg_id = 1030
+message C2S_Chat {
+  string text = 1;
+}

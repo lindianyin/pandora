@@ -1,0 +1,6 @@
+{
+  "name": "pandora",
+  "version-string": "0.1.0",
+  "description": "Pandora card game server (M1)",
+  "dependencies": []
+}

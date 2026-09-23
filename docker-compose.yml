@@ -1,0 +1,47 @@
+# Pandora local deps: MySQL + Redis (Docker Desktop)
+# Uses locally cached tags (mysql:5.7 / redis:6.2.18) to avoid Hub pull failures.
+services:
+  mysql:
+    image: mysql:5.7
+    container_name: pandora-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: pandora
+      MYSQL_DATABASE: pandora
+      MYSQL_USER: pandora
+      MYSQL_PASSWORD: pandora
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - pandora-mysql-data:/var/lib/mysql
+      - ./server/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ppandora"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  redis:
+    image: redis:6.2.18
+    container_name: pandora-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - pandora-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  pandora-mysql-data:
+  pandora-redis-data:
+
