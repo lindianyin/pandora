@@ -47,5 +47,14 @@ export const api = {
   deleteActivity: (id: number) => req('DELETE', `/admin/v1/activities/${id}`),
   simulateSettle: (uid: number, template_id = 1) =>
     req('POST', '/admin/v1/activities/simulate_settle', { uid, template_id }),
+  exportReport: async (kind: 'ledgers' | 'rounds' | 'claims', limit = 5000) => {
+    const API = import.meta.env.VITE_ADMIN_API || 'http://127.0.0.1:8080'
+    const token = localStorage.getItem('admin_token') || ''
+    const res = await fetch(`${API}/admin/v1/reports/${kind}.csv?limit=${limit}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) throw new Error(`export failed ${res.status}`)
+    return res.blob()
+  },
 }
 

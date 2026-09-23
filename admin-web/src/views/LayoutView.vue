@@ -16,6 +16,7 @@ const menus = [
   { path: '/ops', title: '运维' },
   { path: '/audit', title: '审计' },
   { path: '/activities', title: '活动' },
+  { path: '/reports', title: '报表' },
 ]
 
 function logout() {

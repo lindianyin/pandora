@@ -12,6 +12,7 @@ add_executable(pandora-server
   src/net/http_api.cpp
   src/net/ws_server.cpp
   src/net/session_hub.cpp
+  src/net/iocp_pool.cpp
   src/auth/auth_service.cpp
   src/store/memory_store.cpp
   src/store/mysql_client.cpp

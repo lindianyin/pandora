@@ -1,14 +1,16 @@
-# Pandora（M5）
+# Pandora（M6）
 
-依据 [docs/棋牌游戏服务端-SPEC.md](docs/棋牌游戏服务端-SPEC.md)、[M2](docs/棋牌游戏服务端-M2计划.md)、[M2b](docs/棋牌游戏服务端-M2b计划.md)、[M3](docs/棋牌游戏服务端-M3计划.md)、[M4](docs/棋牌游戏服务端-M4计划.md)、[M5](docs/棋牌游戏服务端-M5计划.md)。
+依据 [docs/棋牌游戏服务端-SPEC.md](docs/棋牌游戏服务端-SPEC.md)、[M1](docs/棋牌游戏服务端-M1计划.md)、[M2](docs/棋牌游戏服务端-M2计划.md)、[M2b](docs/棋牌游戏服务端-M2b计划.md)、[M3](docs/棋牌游戏服务端-M3计划.md)、[M4](docs/棋牌游戏服务端-M4计划.md)、[M5](docs/棋牌游戏服务端-M5计划.md)、[M6](docs/棋牌游戏服务端-M6计划.md)。
 
 ## 范围
 
+- **M1**：单体骨架、HTTP/WSS、帧编解码、登录会话、心跳
 - **M2 / M2b / M3**：对局、game-web、钱包、沙箱支付、断线重连
-- **M4**：MySQL/Redis 客户端、Admin API、admin-web、场次/档位热更、审计、封禁/维护
-- **M5**：活动引擎（签到/任务/礼包）、`S2C_ActivityUpdate` 3001、game-web `/activity`、admin 活动 CRUD
+- **M4**：MySQL/Redis、Admin API、admin-web、场次/档位热更、审计
+- **M5**：活动引擎、game-web `/activity`、admin 活动 CRUD
+- **M6**：HTTP/WSS **IOCP**、报表 CSV、`force_tls`、`ccu_load` 压测
 
-**未包含（M6+）**：冲榜活动、真实支付宝验签、报表导出。
+**未包含（后续）**：完整 Schannel TLS、真实支付宝验签、冲榜。
 
 ## 目录
 
@@ -50,9 +52,10 @@ node server\scripts\m2_smoke.mjs
 node server\scripts\m3_smoke.mjs
 node server\scripts\admin_smoke.mjs
 node server\scripts\activity_smoke.mjs
+node server\scripts\ccu_load.mjs --target 200
 ```
 
-`GET /health` 应返回 `mysql:true, redis:true`。
+`GET /health` 应返回 `mysql:true, redis:true` 及 `ccu` / `iocp_workers`。
 
 ## 运营后台
 
@@ -64,9 +67,7 @@ npm run dev
 
 - 地址：`http://127.0.0.1:5174`
 - 默认超管：`admin` / `admin123`
-- 环境变量：`VITE_ADMIN_API=http://127.0.0.1:8080`
-
-可完成：看板、玩家踢/封/补发、账变、对局、场次热更、充值档位、订单、公告、维护开关、审计、**活动 CRUD**。
+- 报表页可下载账变 / 对局 / 活动领取 CSV
 
 ## game-web
 
@@ -76,12 +77,9 @@ npm install
 npm run dev
 ```
 
-大厅可进入 **活动中心**（`/activity`）：列表、进度、领奖；WSS `ActivityUpdate(3001)` 刷新。
-
 ## 验收清单
 
 1. Docker MySQL/Redis healthy；`/health` 双 true  
-2. `admin_smoke` / `activity_smoke` 通过  
-3. admin-web 活动可创建/编辑/下架；审计有记录  
-4. game-web `/activity` 可签到/领奖；任务随结算推进  
-5. M2/M3 冒烟回归  
+2. HTTP/WSS 经 IOCP；无按连接 detach 线程  
+3. `admin_smoke` / `activity_smoke` / 低并发 `ccu_load` 通过  
+4. Admin 报表 CSV 可下载并有审计  

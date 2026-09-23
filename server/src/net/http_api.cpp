@@ -123,6 +123,20 @@ std::string HttpResponse(int status, const std::string& body) {
   return oss.str();
 }
 
+std::string HttpCsvResponse(const std::string& filename, const std::string& csv) {
+  std::ostringstream oss;
+  oss << "HTTP/1.1 200 OK\r\n"
+      << "Content-Type: text/csv; charset=utf-8\r\n"
+      << "Content-Disposition: attachment; filename=\"" << filename << "\"\r\n"
+      << "Access-Control-Allow-Origin: *\r\n"
+      << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
+      << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
+      << "Connection: close\r\n"
+      << "Content-Length: " << csv.size() << "\r\n\r\n"
+      << csv;
+  return oss.str();
+}
+
 int64_t PathUid(const std::string& path, const std::string& prefix) {
   if (path.rfind(prefix, 0) != 0) return 0;
   auto rest = path.substr(prefix.size());
@@ -136,7 +150,12 @@ int64_t PathUid(const std::string& path, const std::string& prefix) {
 
 void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
                   AdminService& admin, ActivityService& activity, MysqlClient& mysql, RedisClient& redis,
-                  const AppConfig& cfg) {
+                  SessionHub& hub, const AppConfig& cfg) {
+  if (cfg.net.force_tls) {
+    // M6 gate: plaintext business rejected until Schannel TLS is wired
+    closesocket(client);
+    return;
+  }
   char buf[16384];
   const int n = recv(client, buf, sizeof(buf) - 1, 0);
   if (n <= 0) {
@@ -152,6 +171,13 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
     std::istringstream iss(request_line);
     iss >> method >> path;
   }
+  // strip query
+  const auto qpos = path.find('?');
+  std::string query;
+  if (qpos != std::string::npos) {
+    query = path.substr(qpos + 1);
+    path = path.substr(0, qpos);
+  }
   std::string body;
   const auto hdr_end = req.find("\r\n\r\n");
   if (hdr_end != std::string::npos) body = req.substr(hdr_end + 4);
@@ -166,6 +192,7 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
   const auto trace = MakeTrace();
   std::string resp_body;
   int status = 200;
+  std::string raw_http;  // if set, send as-is (CSV)
 
   auto requirePlayer = [&]() -> std::optional<int64_t> {
     auto sess = auth.ValidateToken(ExtractBearer(req));
@@ -184,7 +211,8 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
     const bool redis_ok = redis.Ping();
     resp_body = OkJson(std::string("{\"status\":\"ok\",\"mysql\":") + (mysql_ok ? "true" : "false") + ",\"redis\":" +
                            (redis_ok ? "true" : "false") + ",\"store\":\"" + cfg.store_backend +
-                           "\",\"ccu\":" + std::to_string(store.SessionCount()) + "}",
+                           "\",\"ccu\":" + std::to_string(hub.OnlineCount()) +
+                           ",\"iocp_workers\":" + std::to_string(cfg.net.iocp_workers) + "}",
                        trace);
   } else if (method == "GET" && path == "/admin/v1/ping") {
     resp_body = OkJson("{\"pong\":true}", trace);
@@ -654,6 +682,43 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
           resp_body = OkJson("{\"ok\":true}", trace);
         }
       }
+    } else if (method == "GET" && path.rfind("/admin/v1/reports/", 0) == 0) {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) {
+        status = 403;
+        resp_body = ErrJson(Err::kForbidden, trace);
+      } else {
+        const std::string kind = path.substr(std::string("/admin/v1/reports/").size());
+        int limit = 5000;
+        auto lp = query.find("limit=");
+        if (lp != std::string::npos) {
+          try {
+            limit = std::stoi(query.substr(lp + 6));
+          } catch (...) {
+          }
+        }
+        if (limit < 1) limit = 1;
+        if (limit > 50000) limit = 50000;
+        std::string csv;
+        std::string fname;
+        if (kind == "ledgers.csv") {
+          csv = admin.ExportLedgersCsv(limit);
+          fname = "ledgers.csv";
+        } else if (kind == "rounds.csv") {
+          csv = admin.ExportRoundsCsv(limit);
+          fname = "rounds.csv";
+        } else if (kind == "claims.csv") {
+          csv = admin.ExportClaimsCsv(limit);
+          fname = "claims.csv";
+        } else {
+          status = 404;
+          resp_body = ErrJson(Err::kNotFound, trace);
+        }
+        if (!fname.empty()) {
+          admin.Audit(s->admin_id, "export_report", fname, "", std::to_string(limit));
+          raw_http = HttpCsvResponse(fname, csv);
+        }
+      }
     } else if (method == "DELETE" && path.rfind("/admin/v1/activities/", 0) == 0) {
       auto s = requireAdmin(AdminRole::kOps);
       if (!s) {
@@ -679,15 +744,20 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
     resp_body = ErrJson(Err::kNotFound, trace);
   }
 
-  const auto resp = HttpResponse(status, resp_body);
-  send(client, resp.c_str(), static_cast<int>(resp.size()), 0);
+  if (!raw_http.empty()) {
+    send(client, raw_http.c_str(), static_cast<int>(raw_http.size()), 0);
+  } else {
+    const auto resp = HttpResponse(status, resp_body);
+    send(client, resp.c_str(), static_cast<int>(resp.size()), 0);
+  }
   closesocket(client);
 }
 
 }  // namespace
 
 HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
-                 AdminService& admin, ActivityService& activity, MysqlClient& mysql, RedisClient& redis)
+                 AdminService& admin, ActivityService& activity, MysqlClient& mysql, RedisClient& redis,
+                 SessionHub& hub)
     : cfg_(std::move(cfg)),
       store_(store),
       auth_(auth),
@@ -696,11 +766,19 @@ HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletSer
       admin_(admin),
       activity_(activity),
       mysql_(mysql),
-      redis_(redis) {}
+      redis_(redis),
+      hub_(hub) {}
 
 void HttpApi::Run() {
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 2), &wsa);
+  if (!pool_.Start(cfg_.net.iocp_workers, [this](ULONG_PTR key, DWORD, OVERLAPPED*, bool) {
+        HandleClient(static_cast<socket_t>(key), store_, auth_, wallet_, pay_, admin_, activity_, mysql_, redis_, hub_,
+                     cfg_);
+      })) {
+    PLOG_ERROR("HTTP IOCP start failed");
+    return;
+  }
   socket_t listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   BOOL yes = 1;
   setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
@@ -712,16 +790,17 @@ void HttpApi::Run() {
     PLOG_ERROR("http bind failed port=" << cfg_.net.http_port);
     return;
   }
-  listen(listen_sock, 128);
-  PLOG_INFO("HTTP listening on :" << cfg_.net.http_port);
+  listen(listen_sock, SOMAXCONN);
+  PLOG_INFO("HTTP IOCP listening on :" << cfg_.net.http_port << " workers=" << pool_.WorkerCount());
   while (true) {
     socket_t client = accept(listen_sock, nullptr, nullptr);
     if (client == INVALID_SOCKET) continue;
-    std::thread(HandleClient, client, std::ref(store_), std::ref(auth_), std::ref(wallet_), std::ref(pay_),
-                std::ref(admin_), std::ref(activity_), std::ref(mysql_), std::ref(redis_), std::cref(cfg_))
-        .detach();
+    if (!pool_.Post(static_cast<ULONG_PTR>(client))) {
+      closesocket(client);
+    }
   }
 }
+
 
 }  // namespace pandora
 

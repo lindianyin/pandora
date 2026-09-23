@@ -91,6 +91,10 @@ class AdminService {
   bool SetMaintainOp(bool on, const AdminSession& admin, std::string* err);
   std::string ListAuditJson(int page, int page_size) const;
 
+  std::string ExportLedgersCsv(int limit) const;
+  std::string ExportRoundsCsv(int limit) const;
+  std::string ExportClaimsCsv(int limit) const;
+
   void RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json, int base_score,
                    int multiplier);
 

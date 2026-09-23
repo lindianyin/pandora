@@ -58,8 +58,11 @@ AppConfig LoadConfig(const std::string& path) {
   cfg.net.heartbeat_interval_s = ExtractInt(text, "heartbeat_interval_s", cfg.net.heartbeat_interval_s);
   cfg.net.heartbeat_timeout_s = ExtractInt(text, "heartbeat_timeout_s", cfg.net.heartbeat_timeout_s);
   cfg.net.tls_enabled = ExtractBool(text, "enabled", false);
+  cfg.net.force_tls = ExtractBool(text, "force_tls", false);
   cfg.net.tls_cert = ExtractString(text, "cert", "");
   cfg.net.tls_key = ExtractString(text, "key", "");
+  cfg.net.iocp_workers = ExtractInt(text, "iocp_workers", cfg.net.iocp_workers);
+  cfg.net.max_connections = ExtractInt(text, "max_connections", cfg.net.max_connections);
 
   cfg.store_backend = ExtractString(text, "backend", cfg.store_backend);
   cfg.game.base_score = ExtractInt(text, "base_score", cfg.game.base_score);

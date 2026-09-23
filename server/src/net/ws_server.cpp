@@ -1,5 +1,6 @@
 #include "net/ws_server.hpp"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -352,6 +352,24 @@ WsServer::WsServer(AppConfig cfg, AuthService& auth, GameRuntime& runtime, Admin
 void WsServer::Run() {
   WSADATA wsa;
   WSAStartup(MAKEWORD(2, 2), &wsa);
+  // SessionLoop is long-lived; WS IOCP pool sized for concurrent sessions (no per-accept detach).
+  const int ws_workers = (std::max)(cfg_.net.iocp_workers, 256);
+  if (!pool_.Start(ws_workers, [this](ULONG_PTR key, DWORD, OVERLAPPED*, bool) {
+        const socket_t client = static_cast<socket_t>(key);
+        if (cfg_.net.force_tls) {
+          closesocket(client);
+          return;
+        }
+        if (cfg_.net.max_connections > 0 &&
+            runtime_.hub.OnlineCount() >= static_cast<size_t>(cfg_.net.max_connections)) {
+          closesocket(client);
+          return;
+        }
+        SessionLoop(client, auth_, runtime_, admin_, cfg_.net.max_frame_bytes, cfg_.net.heartbeat_timeout_s);
+      })) {
+    PLOG_ERROR("WS IOCP start failed");
+    return;
+  }
   socket_t listen_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -364,13 +382,14 @@ void WsServer::Run() {
     return;
   }
   listen(listen_fd, SOMAXCONN);
-  PLOG_INFO("WS listening on " << cfg_.net.ws_host << ":" << cfg_.net.ws_port);
+  PLOG_INFO("WS IOCP listening on " << cfg_.net.ws_host << ":" << cfg_.net.ws_port
+                                    << " workers=" << pool_.WorkerCount());
   while (true) {
     socket_t client = accept(listen_fd, nullptr, nullptr);
     if (client == INVALID_SOCKET) continue;
-    std::thread([client, this]() {
-      SessionLoop(client, auth_, runtime_, admin_, cfg_.net.max_frame_bytes, cfg_.net.heartbeat_timeout_s);
-    }).detach();
+    if (!pool_.Post(static_cast<ULONG_PTR>(client))) {
+      closesocket(client);
+    }
   }
 }
 

@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
   }
 
   auto cfg = LoadConfig(conf_path);
-  PLOG_INFO("pandora-server M5 starting, config=" << conf_path);
+  PLOG_INFO("pandora-server M6 starting, config=" << conf_path);
 
   MysqlClient mysql(cfg.mysql.dsn);
   RedisClient redis(cfg.redis.uri);
@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
   admin.Bootstrap();
   activity.Bootstrap();
 
-  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, mysql, redis);
+  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, mysql, redis, runtime.hub);
   WsServer ws(cfg, auth, runtime, &admin);
 
   std::thread http_thread([&]() { http.Run(); });
@@ -73,7 +73,8 @@ int main(int argc, char** argv) {
     }
   });
 
-  PLOG_INFO("M5 ready: HTTP :" << cfg.net.http_port << " WS :" << cfg.net.ws_port
+  PLOG_INFO("M6 ready: HTTP :" << cfg.net.http_port << " WS :" << cfg.net.ws_port
+                               << " iocp_workers=" << cfg.net.iocp_workers << " force_tls=" << cfg.net.force_tls
                                << " mysql=" << mysql.Available() << " redis=" << redis.Available());
   while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
   PLOG_INFO("shutting down");

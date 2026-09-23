@@ -11,11 +11,14 @@ struct NetConfig {
   std::string ws_host{"0.0.0.0"};
   int ws_port{8081};
   bool tls_enabled{false};
+  bool force_tls{false};
   std::string tls_cert;
   std::string tls_key;
   uint32_t max_frame_bytes{1048576};
   int heartbeat_interval_s{15};
   int heartbeat_timeout_s{45};
+  int iocp_workers{8};
+  int max_connections{30000};
 };
 
 struct GameConfig {

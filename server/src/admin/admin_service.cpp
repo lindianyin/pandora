@@ -258,7 +258,7 @@ std::string AdminService::DashboardJson() const {
     }
   }
   std::ostringstream oss;
-  oss << "{\"ccu\":" << store_.SessionCount() << ",\"players\":" << players << ",\"rounds\":" << rounds
+  oss << "{\"ccu\":" << hub_.OnlineCount() << ",\"players\":" << players << ",\"rounds\":" << rounds
       << ",\"orders\":" << orders << ",\"maintain\":" << (IsMaintain() ? "true" : "false")
       << ",\"mysql\":" << (mysql_.Available() ? "true" : "false")
       << ",\"redis\":" << (redis_.Available() ? "true" : "false") << "}";
@@ -653,6 +653,60 @@ std::string AdminService::ListAuditJson(int page, int page_size) const {
         << "\",\"created_at\":\"" << JsonStr(a.created_at) << "\"}";
   }
   oss << "]}";
+  return oss.str();
+}
+
+std::string AdminService::ExportLedgersCsv(int limit) const {
+  std::ostringstream oss;
+  oss << "id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id\n";
+  if (!mysql_.Available()) return oss.str();
+  auto rows = mysql_.Query(
+      "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger ORDER BY id "
+      "DESC LIMIT " +
+      std::to_string(limit));
+  if (!rows) return oss.str();
+  for (const auto& row : *rows) {
+    if (row.cols.size() < 8) continue;
+    oss << row.cols[0] << ',' << row.cols[1] << ',' << row.cols[2] << ',' << row.cols[3] << ',' << row.cols[4] << ",\""
+        << Escape(row.cols[5]) << "\",\"" << Escape(row.cols[6]) << "\",\"" << Escape(row.cols[7]) << "\"\n";
+  }
+  return oss.str();
+}
+
+std::string AdminService::ExportRoundsCsv(int limit) const {
+  std::ostringstream oss;
+  oss << "round_id,room_id,template_id,base_score,multiplier,players_json\n";
+  if (!mysql_.Available()) return oss.str();
+  auto rows = mysql_.Query(
+      "SELECT round_id,room_id,template_id,base_score,multiplier,CAST(players_json AS CHAR) FROM game_round ORDER BY "
+      "round_id DESC LIMIT " +
+      std::to_string(limit));
+  if (!rows) return oss.str();
+  for (const auto& row : *rows) {
+    if (row.cols.size() < 6) continue;
+    std::string pj = row.cols[5];
+    for (char& c : pj)
+      if (c == '"') c = '\'';
+    oss << row.cols[0] << ',' << row.cols[1] << ',' << row.cols[2] << ',' << row.cols[3] << ',' << row.cols[4] << ",\""
+        << pj << "\"\n";
+  }
+  return oss.str();
+}
+
+std::string AdminService::ExportClaimsCsv(int limit) const {
+  std::ostringstream oss;
+  oss << "id,activity_id,uid,reward_key,created_at\n";
+  if (!mysql_.Available()) return oss.str();
+  auto rows = mysql_.Query(
+      "SELECT id,activity_id,uid,reward_key,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM activity_claim ORDER BY "
+      "id DESC LIMIT " +
+      std::to_string(limit));
+  if (!rows) return oss.str();
+  for (const auto& row : *rows) {
+    if (row.cols.size() < 5) continue;
+    oss << row.cols[0] << ',' << row.cols[1] << ',' << row.cols[2] << ",\"" << Escape(row.cols[3]) << "\","
+        << row.cols[4] << "\n";
+  }
   return oss.str();
 }
 
