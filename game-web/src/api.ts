@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8080'
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://127.0.0.1:8443'
 
 export type ApiResult<T> = { code: number; message: string; data: T; trace_id: string }
 

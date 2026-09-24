@@ -1,9 +1,14 @@
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/signal_set.hpp>
 
 #include "activity/activity_service.hpp"
 #include "admin/admin_service.hpp"
@@ -39,10 +44,11 @@ int main(int argc, char** argv) {
   }
 
   auto cfg = LoadConfig(conf_path);
-  PLOG_INFO("pandora-server M6 starting, config=" << conf_path);
+  const auto conf_dir = std::filesystem::path(conf_path).parent_path();
+  PLOG_INFO("pandora-server Beast stack starting, config=" << conf_path);
 
-  MysqlClient mysql(cfg.mysql.dsn);
-  RedisClient redis(cfg.redis.uri);
+  MysqlClient mysql(cfg.mysql.dsn, cfg.mysql.pool_size);
+  RedisClient redis(cfg.redis.uri, cfg.redis.pool_size);
   MemoryStore store(mysql, redis);
   AuthService auth(store);
   WalletService wallet(store, cfg.exchange.diamond_to_gold);
@@ -61,23 +67,38 @@ int main(int argc, char** argv) {
   admin.Bootstrap();
   activity.Bootstrap();
 
+  const int workers = (std::max)(1, cfg.net.iocp_workers);
+  boost::asio::io_context ioc{workers};
+
   HttpApi http(cfg, store, auth, wallet, pay, admin, activity, mysql, redis, runtime.hub);
   WsServer ws(cfg, auth, runtime, &admin);
+  http.Start(ioc, conf_dir);
+  ws.Start(ioc, conf_dir);
 
-  std::thread http_thread([&]() { http.Run(); });
-  std::thread ws_thread([&]() { ws.Run(); });
   std::thread tick_thread([&]() {
     while (g_running) {
       runtime.Tick();
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    ioc.stop();
   });
 
-  PLOG_INFO("M6 ready: HTTP :" << cfg.net.http_port << " WS :" << cfg.net.ws_port
-                               << " iocp_workers=" << cfg.net.iocp_workers << " force_tls=" << cfg.net.force_tls
-                               << " mysql=" << mysql.Available() << " redis=" << redis.Available());
-  while (g_running) std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  PLOG_INFO("shutting down");
-  std::exit(0);
-}
+  std::vector<std::thread> pool;
+  pool.reserve(static_cast<size_t>(workers));
+  for (int i = 0; i < workers; ++i) {
+    pool.emplace_back([&ioc]() { ioc.run(); });
+  }
 
+  PLOG_INFO("ready: " << (cfg.net.tls_enabled ? "HTTPS" : "HTTP") << " :" << cfg.net.http_port << " "
+                      << (cfg.net.tls_enabled ? "WSS" : "WS") << " :" << cfg.net.ws_port
+                      << " asio_workers=" << workers << " tls=" << cfg.net.tls_enabled
+                      << " force_tls=" << cfg.net.force_tls << " mysql=" << mysql.Available()
+                      << " mysql_pool=" << mysql.PoolSize() << " redis=" << redis.Available()
+                      << " redis_pool=" << redis.PoolSize());
+
+  for (auto& t : pool) t.join();
+  g_running = false;
+  if (tick_thread.joinable()) tick_thread.join();
+  PLOG_INFO("shutting down");
+  return 0;
+}

@@ -2,12 +2,18 @@
 **/build/
 **/out/
 **/cmake-build-*/
+server/build/
+server/build-*/
 **/.vs/
 **/*.user
 **/CMakeSettings.json
+*.log
 
 # vcpkg / deps
 **/vcpkg_installed/
+vcpkg_installed_*/
+third_party/boost_1_86_0/
+third_party/*.tar.gz
 server/third_party/asio-*/
 
 # IDE
@@ -31,6 +37,13 @@ game-web/src/generated/
 **/*.key
 **/secrets/
 server/conf/server.local.json
+server/selfsigned-*.tgz
+server/scripts/gencert/bin/
+server/scripts/gencert/obj/
+
+# Temp
+tmp-*.html
+tmp-*.json
 
 # OS
 Thumbs.db

@@ -4,7 +4,7 @@ import { GameSocket } from '../net/GameSocket'
 import { cardLabel, type LobbyTemplate, type RoomSeat } from '../net/frame'
 import router from '../router'
 
-const WSS_URL = import.meta.env.VITE_WSS_URL || 'ws://127.0.0.1:8081/'
+const WSS_URL = import.meta.env.VITE_WSS_URL || 'wss://127.0.0.1:8444/'
 
 export type SettleInfo = {
   round_id: number

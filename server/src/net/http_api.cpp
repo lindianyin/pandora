@@ -1,140 +1,92 @@
 #include "net/http_api.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
-#include <thread>
+#include <utility>
 
-#ifdef _WIN32
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "ws2_32.lib")
-using socket_t = SOCKET;
-#else
-#error "http server currently targets Windows"
-#endif
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ssl.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
+#include <boost/beast/version.hpp>
+#include <nlohmann/json.hpp>
 
 #include "common/errors.hpp"
 #include "common/log.hpp"
+#include "net/tls_util.hpp"
 
 namespace pandora {
 namespace {
 
-std::string JsonEscape(const std::string& s) {
-  std::string o;
-  o.reserve(s.size());
-  for (char c : s) {
-    switch (c) {
-      case '\\':
-        o += "\\\\";
-        break;
-      case '"':
-        o += "\\\"";
-        break;
-      case '\n':
-        o += "\\n";
-        break;
-      case '\r':
-        o += "\\r";
-        break;
-      default:
-        o.push_back(c);
-    }
-  }
-  return o;
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace net = boost::asio;
+namespace ssl = boost::asio::ssl;
+using tcp = net::ip::tcp;
+using json = nlohmann::json;
+
+std::string MakeTrace() {
+  using namespace std::chrono;
+  return std::to_string(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
 }
 
-std::string OkJson(const std::string& data, const std::string& trace) {
-  return std::string("{\"code\":0,\"message\":\"ok\",\"data\":") + data + ",\"trace_id\":\"" + JsonEscape(trace) +
-         "\"}";
+json OkObj(json data, const std::string& trace) {
+  return json{{"code", 0}, {"message", "ok"}, {"data", std::move(data)}, {"trace_id", trace}};
 }
 
-std::string ErrJson(Err code, const std::string& trace, const std::string& msg = {}) {
-  const char* m = msg.empty() ? ErrMessage(code) : msg.c_str();
-  return std::string("{\"code\":") + std::to_string(static_cast<int>(code)) + ",\"message\":\"" + JsonEscape(m) +
-         "\",\"data\":{},\"trace_id\":\"" + JsonEscape(trace) + "\"}";
+json ErrObj(Err code, const std::string& trace, const std::string& msg = {}) {
+  return json{{"code", static_cast<int>(code)},
+              {"message", msg.empty() ? ErrMessage(code) : msg},
+              {"data", json::object()},
+              {"trace_id", trace}};
 }
 
-std::string MakeTrace() { return std::to_string(GetTickCount64()); }
-
-std::string ExtractJsonString(const std::string& body, const std::string& key) {
-  const std::string pat = "\"" + key + "\"";
-  auto p = body.find(pat);
-  if (p == std::string::npos) return {};
-  p = body.find(':', p);
-  if (p == std::string::npos) return {};
-  p = body.find('"', p);
-  if (p == std::string::npos) return {};
-  ++p;
-  auto e = body.find('"', p);
-  if (e == std::string::npos) return {};
-  return body.substr(p, e - p);
-}
-
-int64_t ExtractJsonInt(const std::string& body, const std::string& key, int64_t def = 0) {
-  const std::string pat = "\"" + key + "\"";
-  auto p = body.find(pat);
-  if (p == std::string::npos) return def;
-  p = body.find(':', p);
-  if (p == std::string::npos) return def;
-  ++p;
-  while (p < body.size() && (body[p] == ' ' || body[p] == '\t')) ++p;
+json ParseBody(const std::string& body) {
+  if (body.empty()) return json::object();
   try {
-    return std::stoll(body.substr(p));
+    return json::parse(body);
   } catch (...) {
-    return def;
+    return json::object();
   }
 }
 
-bool ExtractJsonBool(const std::string& body, const std::string& key, bool def = false) {
-  const std::string pat = "\"" + key + "\"";
-  auto p = body.find(pat);
-  if (p == std::string::npos) return def;
-  p = body.find(':', p);
-  if (p == std::string::npos) return def;
-  auto sub = body.substr(p + 1, 16);
-  if (sub.find("true") != std::string::npos) return true;
-  if (sub.find("false") != std::string::npos) return false;
+std::string JStr(const json& j, const char* key, const std::string& def = {}) {
+  if (!j.contains(key)) return def;
+  if (j[key].is_string()) return j[key].get<std::string>();
+  if (j[key].is_number() || j[key].is_boolean()) return j[key].dump();
   return def;
 }
 
-std::string ExtractBearer(const std::string& req) {
-  const auto auth_h = req.find("Authorization:");
-  if (auth_h == std::string::npos) return {};
-  auto p = req.find("Bearer ", auth_h);
-  if (p == std::string::npos) return {};
-  p += 7;
-  auto e = req.find("\r\n", p);
-  auto t = req.substr(p, e == std::string::npos ? std::string::npos : e - p);
-  while (!t.empty() && (t.back() == ' ' || t.back() == '\r')) t.pop_back();
-  return t;
+int64_t JInt(const json& j, const char* key, int64_t def = 0) {
+  if (!j.contains(key) || j[key].is_null()) return def;
+  try {
+    if (j[key].is_number_integer()) return j[key].get<int64_t>();
+    if (j[key].is_string()) return std::stoll(j[key].get<std::string>());
+  } catch (...) {
+  }
+  return def;
 }
 
-std::string HttpResponse(int status, const std::string& body) {
-  std::ostringstream oss;
-  oss << "HTTP/1.1 " << status << " OK\r\n"
-      << "Content-Type: application/json; charset=utf-8\r\n"
-      << "Access-Control-Allow-Origin: *\r\n"
-      << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
-      << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
-      << "Connection: close\r\n"
-      << "Content-Length: " << body.size() << "\r\n\r\n"
-      << body;
-  return oss.str();
+bool JBool(const json& j, const char* key, bool def = false) {
+  if (!j.contains(key)) return def;
+  if (j[key].is_boolean()) return j[key].get<bool>();
+  return def;
 }
 
-std::string HttpCsvResponse(const std::string& filename, const std::string& csv) {
-  std::ostringstream oss;
-  oss << "HTTP/1.1 200 OK\r\n"
-      << "Content-Type: text/csv; charset=utf-8\r\n"
-      << "Content-Disposition: attachment; filename=\"" << filename << "\"\r\n"
-      << "Access-Control-Allow-Origin: *\r\n"
-      << "Access-Control-Allow-Headers: Content-Type, Authorization\r\n"
-      << "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n"
-      << "Connection: close\r\n"
-      << "Content-Length: " << csv.size() << "\r\n\r\n"
-      << csv;
-  return oss.str();
+std::string ExtractBearer(const http::request<http::string_body>& req) {
+  auto it = req.find(http::field::authorization);
+  if (it == req.end()) return {};
+  std::string v(it->value());
+  const std::string prefix = "Bearer ";
+  if (v.rfind(prefix, 0) != 0) return {};
+  return v.substr(prefix.size());
 }
 
 int64_t PathUid(const std::string& path, const std::string& prefix) {
@@ -148,546 +100,372 @@ int64_t PathUid(const std::string& path, const std::string& prefix) {
   }
 }
 
-void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
-                  AdminService& admin, ActivityService& activity, MysqlClient& mysql, RedisClient& redis,
-                  SessionHub& hub, const AppConfig& cfg) {
-  if (cfg.net.force_tls) {
-    // M6 gate: plaintext business rejected until Schannel TLS is wired
-    closesocket(client);
-    return;
-  }
-  char buf[16384];
-  const int n = recv(client, buf, sizeof(buf) - 1, 0);
-  if (n <= 0) {
-    closesocket(client);
-    return;
-  }
-  buf[n] = 0;
-  const std::string req(buf, n);
-  const auto line_end = req.find("\r\n");
-  const std::string request_line = line_end == std::string::npos ? req : req.substr(0, line_end);
-  std::string method, path;
-  {
-    std::istringstream iss(request_line);
-    iss >> method >> path;
-  }
-  // strip query
-  const auto qpos = path.find('?');
+struct HttpResult {
+  int status{200};
+  std::string content_type{"application/json; charset=utf-8"};
+  std::string body;
+  std::string content_disposition;
+};
+
+HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*store*/, AuthService& auth,
+                    WalletService& wallet, PayService& pay, AdminService& admin, ActivityService& activity,
+                    MysqlClient& mysql, RedisClient& redis, SessionHub& hub, const AppConfig& cfg) {
+  HttpResult out;
+  const std::string method(req.method_string());
+  std::string target(req.target());
+  std::string path = target;
   std::string query;
+  const auto qpos = path.find('?');
   if (qpos != std::string::npos) {
     query = path.substr(qpos + 1);
     path = path.substr(0, qpos);
   }
-  std::string body;
-  const auto hdr_end = req.find("\r\n\r\n");
-  if (hdr_end != std::string::npos) body = req.substr(hdr_end + 4);
-
-  if (method == "OPTIONS") {
-    const auto resp = HttpResponse(204, "");
-    send(client, resp.c_str(), static_cast<int>(resp.size()), 0);
-    closesocket(client);
-    return;
-  }
-
+  const auto body_str = req.body();
+  const json body = ParseBody(body_str);
   const auto trace = MakeTrace();
-  std::string resp_body;
-  int status = 200;
-  std::string raw_http;  // if set, send as-is (CSV)
+  const auto bearer = ExtractBearer(req);
 
   auto requirePlayer = [&]() -> std::optional<int64_t> {
-    auto sess = auth.ValidateToken(ExtractBearer(req));
+    auto sess = auth.ValidateToken(bearer);
     if (!sess) return std::nullopt;
     return sess->uid;
   };
-
   auto requireAdmin = [&](AdminRole min) -> std::optional<AdminSession> {
-    auto s = admin.Validate(ExtractBearer(req));
+    auto s = admin.Validate(bearer);
     if (!s || !admin.RequireRole(*s, min)) return std::nullopt;
     return s;
   };
+  auto setJson = [&](int status, const json& j) {
+    out.status = status;
+    out.body = j.dump();
+  };
+
+  if (method == "OPTIONS") {
+    out.status = 204;
+    out.body.clear();
+    return out;
+  }
 
   if (method == "GET" && path == "/health") {
-    const bool mysql_ok = mysql.Ping();
-    const bool redis_ok = redis.Ping();
-    resp_body = OkJson(std::string("{\"status\":\"ok\",\"mysql\":") + (mysql_ok ? "true" : "false") + ",\"redis\":" +
-                           (redis_ok ? "true" : "false") + ",\"store\":\"" + cfg.store_backend +
-                           "\",\"ccu\":" + std::to_string(hub.OnlineCount()) +
-                           ",\"iocp_workers\":" + std::to_string(cfg.net.iocp_workers) + "}",
-                       trace);
+    setJson(200, OkObj({{"status", "ok"},
+                        {"mysql", mysql.Ping()},
+                        {"redis", redis.Ping()},
+                        {"store", cfg.store_backend},
+                        {"ccu", hub.OnlineCount()},
+                        {"iocp_workers", cfg.net.iocp_workers},
+                        {"tls", cfg.net.tls_enabled}},
+                       trace));
   } else if (method == "GET" && path == "/admin/v1/ping") {
-    resp_body = OkJson("{\"pong\":true}", trace);
+    setJson(200, OkObj({{"pong", true}}, trace));
   } else if (method == "POST" && path.rfind("/api/v1/auth/login", 0) == 0) {
     if (admin.IsMaintain()) {
-      status = 503;
-      resp_body = ErrJson(Err::kMaintain, trace);
+      setJson(503, ErrObj(Err::kMaintain, trace));
     } else {
-      const auto device = ExtractJsonString(body, "device_id");
-      auto login = auth.LoginGuest(device);
+      auto login = auth.LoginGuest(JStr(body, "device_id"));
       if (admin.IsBanned(login.uid)) {
-        status = 403;
-        resp_body = ErrJson(Err::kBanned, trace);
+        setJson(403, ErrObj(Err::kBanned, trace));
       } else {
         try {
           activity.OnLogin(login.uid);
         } catch (...) {
         }
-        std::ostringstream data;
-        data << "{\"access_token\":\"" << JsonEscape(login.token) << "\",\"uid\":" << login.uid << ",\"nickname\":\""
-             << JsonEscape(login.nickname) << "\",\"gold\":" << login.gold << ",\"diamond\":" << login.diamond << "}";
-        resp_body = OkJson(data.str(), trace);
+        setJson(200, OkObj({{"access_token", login.token},
+                            {"uid", login.uid},
+                            {"nickname", login.nickname},
+                            {"gold", login.gold},
+                            {"diamond", login.diamond}},
+                           trace));
       }
     }
   } else if (method == "GET" && path.rfind("/api/v1/player/profile", 0) == 0) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
       auto player = wallet.Profile(*uid);
-      if (!player) {
-        status = 404;
-        resp_body = ErrJson(Err::kNotFound, trace);
-      } else {
-        std::ostringstream data;
-        data << "{\"uid\":" << player->uid << ",\"nickname\":\"" << JsonEscape(player->nickname)
-             << "\",\"gold\":" << player->gold << ",\"diamond\":" << player->diamond << ",\"level\":1}";
-        resp_body = OkJson(data.str(), trace);
-      }
+      if (!player) setJson(404, ErrObj(Err::kNotFound, trace));
+      else
+        setJson(200, OkObj({{"uid", player->uid},
+                            {"nickname", player->nickname},
+                            {"gold", player->gold},
+                            {"diamond", player->diamond},
+                            {"level", 1}},
+                           trace));
     }
   } else if (method == "POST" && path.rfind("/api/v1/wallet/exchange", 0) == 0) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
-      const int64_t diamond = ExtractJsonInt(body, "diamond", 0);
-      const auto order_id = ExtractJsonString(body, "client_order_id");
-      auto r = wallet.ExchangeDiamondToGold(*uid, diamond, order_id);
-      if (!r.ok) {
-        status = 400;
-        resp_body = ErrJson(Err::kInsufficient, trace, r.error);
-      } else {
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      auto r = wallet.ExchangeDiamondToGold(*uid, JInt(body, "diamond"), JStr(body, "client_order_id"));
+      if (!r.ok) setJson(400, ErrObj(Err::kInsufficient, trace, r.error));
+      else {
         auto p = wallet.Profile(*uid);
-        std::ostringstream data;
-        data << "{\"gold\":" << (p ? p->gold : r.balance) << ",\"diamond\":" << (p ? p->diamond : 0)
-             << ",\"rate\":" << wallet.DiamondToGoldRate() << "}";
-        resp_body = OkJson(data.str(), trace);
+        setJson(200, OkObj({{"gold", p ? p->gold : r.balance},
+                            {"diamond", p ? p->diamond : 0},
+                            {"rate", wallet.DiamondToGoldRate()}},
+                           trace));
       }
     }
   } else if (method == "GET" && path.rfind("/api/v1/pay/products", 0) == 0) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
-      auto products = pay.ListProducts(false);
-      std::ostringstream data;
-      data << "{\"items\":[";
-      for (size_t i = 0; i < products.size(); ++i) {
-        if (i) data << ",";
-        data << "{\"id\":" << products[i].id << ",\"amount_fen\":" << products[i].amount_fen
-             << ",\"diamond\":" << products[i].diamond << ",\"gift_diamond\":" << products[i].gift_diamond << "}";
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      json items = json::array();
+      for (const auto& p : pay.ListProducts(false)) {
+        items.push_back({{"id", p.id},
+                         {"amount_fen", p.amount_fen},
+                         {"diamond", p.diamond},
+                         {"gift_diamond", p.gift_diamond}});
       }
-      data << "],\"sandbox\":" << (pay.Sandbox() ? "true" : "false") << "}";
-      resp_body = OkJson(data.str(), trace);
+      setJson(200, OkObj({{"items", items}, {"sandbox", pay.Sandbox()}}, trace));
     }
   } else if (method == "POST" && path.rfind("/api/v1/pay/alipay/create", 0) == 0) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
-      const int product_id = static_cast<int>(ExtractJsonInt(body, "product_id", 0));
-      auto order = pay.CreateOrder(*uid, product_id);
-      if (!order) {
-        status = 400;
-        resp_body = ErrJson(Err::kBadParam, trace, "bad product");
-      } else {
-        const auto ostr = pay.BuildOrderStr(*order);
-        std::ostringstream data;
-        data << "{\"order_id\":\"" << JsonEscape(order->order_id) << "\",\"amount_fen\":" << order->amount_fen
-             << ",\"diamond\":" << order->diamond << ",\"alipay_order_str\":\"" << JsonEscape(ostr)
-             << "\",\"sandbox\":" << (pay.Sandbox() ? "true" : "false") << "}";
-        resp_body = OkJson(data.str(), trace);
-      }
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      auto order = pay.CreateOrder(*uid, static_cast<int>(JInt(body, "product_id")));
+      if (!order) setJson(400, ErrObj(Err::kBadParam, trace, "bad product"));
+      else
+        setJson(200, OkObj({{"order_id", order->order_id},
+                            {"amount_fen", order->amount_fen},
+                            {"diamond", order->diamond},
+                            {"alipay_order_str", pay.BuildOrderStr(*order)},
+                            {"sandbox", pay.Sandbox()}},
+                           trace));
     }
   } else if (method == "POST" && path.rfind("/api/v1/pay/alipay/notify", 0) == 0) {
-    const auto order_id = ExtractJsonString(body, "out_trade_no");
-    const auto trade_no = ExtractJsonString(body, "trade_no");
-    const int amount = static_cast<int>(ExtractJsonInt(body, "total_amount", 0));
-    const bool ok = pay.HandleNotify(order_id, trade_no, amount);
-    resp_body = ok ? "success" : "fail";
+    const bool ok =
+        pay.HandleNotify(JStr(body, "out_trade_no"), JStr(body, "trade_no"), static_cast<int>(JInt(body, "total_amount")));
+    out.status = 200;
+    out.content_type = "text/plain; charset=utf-8";
+    out.body = ok ? "success" : "fail";
   } else if (method == "POST" && path.rfind("/api/v1/pay/alipay/sandbox_complete", 0) == 0) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else if (!pay.Sandbox()) {
-      status = 403;
-      resp_body = ErrJson(Err::kForbidden, trace, "sandbox disabled");
-    } else {
-      const auto order_id = ExtractJsonString(body, "order_id");
-      const bool ok = pay.SandboxComplete(*uid, order_id);
-      if (!ok) {
-        status = 400;
-        resp_body = ErrJson(Err::kBadParam, trace, "complete failed");
-      } else {
-        resp_body = OkJson("{\"ok\":true}", trace);
-      }
-    }
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else if (!pay.Sandbox()) setJson(403, ErrObj(Err::kForbidden, trace, "sandbox disabled"));
+    else if (!pay.SandboxComplete(*uid, JStr(body, "order_id")))
+      setJson(400, ErrObj(Err::kBadParam, trace, "complete failed"));
+    else
+      setJson(200, OkObj({{"ok", true}}, trace));
   } else if (method == "GET" && path == "/api/v1/activity/list") {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
-      resp_body = OkJson(activity.ListForPlayerJson(*uid), trace);
-    }
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else setJson(200, OkObj(json::parse(activity.ListForPlayerJson(*uid), nullptr, false), trace));
   } else if (method == "GET" && path.rfind("/api/v1/activity/", 0) == 0 && path.find("/progress") != std::string::npos) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
       const int aid = static_cast<int>(PathUid(path, "/api/v1/activity/"));
-      resp_body = OkJson(activity.ProgressJson(*uid, aid), trace);
+      setJson(200, OkObj(json::parse(activity.ProgressJson(*uid, aid), nullptr, false), trace));
     }
   } else if (method == "POST" && path.rfind("/api/v1/activity/", 0) == 0 && path.find("/claim") != std::string::npos) {
     auto uid = requirePlayer();
-    if (!uid) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace);
-    } else {
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
       const int aid = static_cast<int>(PathUid(path, "/api/v1/activity/"));
-      const auto rk = ExtractJsonString(body, "reward_key");
-      auto cr = activity.Claim(*uid, aid, rk);
-      if (!cr.ok) {
-        status = 400;
-        resp_body = ErrJson(Err::kActivityCannotClaim, trace, cr.error);
-      } else {
-        resp_body = OkJson("{\"balance\":" + std::to_string(cr.balance) + ",\"currency\":" +
-                               std::to_string(cr.currency) + "}",
-                           trace);
-      }
+      auto cr = activity.Claim(*uid, aid, JStr(body, "reward_key"));
+      if (!cr.ok) setJson(400, ErrObj(Err::kActivityCannotClaim, trace, cr.error));
+      else setJson(200, OkObj({{"balance", cr.balance}, {"currency", cr.currency}}, trace));
     }
-  }
-  // -------- Admin API --------
-  else if (method == "POST" && path.rfind("/admin/v1/auth/login", 0) == 0) {
-    const auto user = ExtractJsonString(body, "username");
-    const auto pass = ExtractJsonString(body, "password");
-    auto r = admin.Login(user, pass);
-    if (!r.ok) {
-      status = 401;
-      resp_body = ErrJson(Err::kUnauthorized, trace, r.error);
-    } else {
-      std::ostringstream data;
-      data << "{\"access_token\":\"" << JsonEscape(r.token) << "\",\"username\":\"" << JsonEscape(r.username)
-           << "\",\"role\":\"" << r.role << "\"}";
-      resp_body = OkJson(data.str(), trace);
-    }
+  } else if (method == "POST" && path.rfind("/admin/v1/auth/login", 0) == 0) {
+    auto r = admin.Login(JStr(body, "username"), JStr(body, "password"));
+    if (!r.ok) setJson(401, ErrObj(Err::kUnauthorized, trace, r.error));
+    else setJson(200, OkObj({{"access_token", r.token}, {"username", r.username}, {"role", r.role}}, trace));
   } else if (path.rfind("/admin/v1/", 0) == 0) {
-    // Player token must not access admin
-    if (auth.ValidateToken(ExtractBearer(req)) && !admin.Validate(ExtractBearer(req))) {
-      status = 403;
-      resp_body = ErrJson(Err::kForbidden, trace, "player token not allowed");
-    } else if (method == "GET" && path == "/admin/v1/dashboard") {
+    if (auth.ValidateToken(bearer) && !admin.Validate(bearer)) {
+      setJson(403, ErrObj(Err::kForbidden, trace, "player token not allowed"));
+      return out;
+    }
+    if (method == "GET" && path == "/admin/v1/dashboard") {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else
-        resp_body = OkJson(admin.DashboardJson(), trace);
-    } else if (method == "GET" && path.rfind("/admin/v1/players", 0) == 0 &&
-               path.find("/kick") == std::string::npos && path.find("/ban") == std::string::npos &&
-               path.find("/unban") == std::string::npos) {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.DashboardJson(), nullptr, false), trace));
+    } else if (method == "GET" && path.rfind("/admin/v1/players", 0) == 0 && path.find("/kick") == std::string::npos &&
+               path.find("/ban") == std::string::npos && path.find("/unban") == std::string::npos) {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const auto q = ExtractJsonString(body, "q");
-        // also support query string ?q=
-        std::string qq = q;
-        auto qp = path.find("?q=");
-        if (qp != std::string::npos) qq = path.substr(qp + 3);
-        resp_body = OkJson(admin.ListPlayersJson(qq, 1, 50), trace);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::string qq = JStr(body, "q");
+        auto qp = query.find("q=");
+        if (qp != std::string::npos) qq = query.substr(qp + 2);
+        setJson(200, OkObj(json::parse(admin.ListPlayersJson(qq, 1, 50), nullptr, false), trace));
       }
     } else if (method == "POST" && path.find("/admin/v1/players/") == 0 && path.find("/kick") != std::string::npos) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = PathUid(path, "/admin/v1/players/");
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.Kick(uid, *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.Kick(PathUid(path, "/admin/v1/players/"), *s, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "POST" && path.find("/admin/v1/players/") == 0 && path.find("/ban") != std::string::npos &&
                path.find("/unban") == std::string::npos) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = PathUid(path, "/admin/v1/players/");
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.Ban(uid, true, *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.Ban(PathUid(path, "/admin/v1/players/"), true, *s, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "POST" && path.find("/admin/v1/players/") == 0 && path.find("/unban") != std::string::npos) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = PathUid(path, "/admin/v1/players/");
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.Ban(uid, false, *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.Ban(PathUid(path, "/admin/v1/players/"), false, *s, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "POST" && path == "/admin/v1/wallet/adjust") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = ExtractJsonInt(body, "uid", 0);
-        const int currency = static_cast<int>(ExtractJsonInt(body, "currency", 1));
-        const int64_t delta = ExtractJsonInt(body, "delta", 0);
-        const auto idem = ExtractJsonString(body, "idempotent_key");
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
         int64_t bal = 0;
-        if (!admin.WalletAdjust(uid, currency, delta, idem, *s, &err, &bal)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else {
-          resp_body = OkJson("{\"balance\":" + std::to_string(bal) + "}", trace);
-        }
+        if (!admin.WalletAdjust(JInt(body, "uid"), static_cast<int>(JInt(body, "currency", 1)), JInt(body, "delta"),
+                                JStr(body, "idempotent_key"), *s, &err, &bal))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"balance", bal}}, trace));
       }
     } else if (method == "GET" && path.rfind("/admin/v1/wallet/ledgers", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = ExtractJsonInt(body, "uid", 0);
-        resp_body = OkJson(admin.ListLedgersJson(uid, 1, 50), trace);
-      }
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.ListLedgersJson(JInt(body, "uid"), 1, 50), nullptr, false), trace));
     } else if (method == "GET" && path.rfind("/admin/v1/rounds", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = ExtractJsonInt(body, "uid", 0);
-        resp_body = OkJson(admin.ListRoundsJson(uid, 1, 50), trace);
-      }
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.ListRoundsJson(JInt(body, "uid"), 1, 50), nullptr, false), trace));
     } else if ((method == "GET" || method == "PUT") && path.rfind("/admin/v1/rooms/templates", 0) == 0) {
       if (method == "GET") {
         auto s = requireAdmin(AdminRole::kCs);
-        if (!s) {
-          status = 403;
-          resp_body = ErrJson(Err::kForbidden, trace);
-        } else
-          resp_body = OkJson(admin.ListTemplatesJson(), trace);
+        if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+        else setJson(200, OkObj(json::parse(admin.ListTemplatesJson(), nullptr, false), trace));
       } else {
         auto s = requireAdmin(AdminRole::kOps);
-        if (!s) {
-          status = 403;
-          resp_body = ErrJson(Err::kForbidden, trace);
-        } else {
+        if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+        else {
           std::string err;
-          const bool ok =
-              admin.PutTemplate(static_cast<int>(ExtractJsonInt(body, "id", 1)), ExtractJsonString(body, "name"),
-                                static_cast<int>(ExtractJsonInt(body, "base_score", 100)),
-                                static_cast<int>(ExtractJsonInt(body, "rake_bp", 500)),
-                                ExtractJsonInt(body, "min_gold", 0), ExtractJsonInt(body, "max_gold", 0),
-                                ExtractJsonBool(body, "enabled", true), *s, &err);
-          if (!ok) {
-            status = 400;
-            resp_body = ErrJson(Err::kBadParam, trace, err);
-          } else
-            resp_body = OkJson("{\"ok\":true}", trace);
+          const bool ok = admin.PutTemplate(static_cast<int>(JInt(body, "id", 1)), JStr(body, "name"),
+                                            static_cast<int>(JInt(body, "base_score", 100)),
+                                            static_cast<int>(JInt(body, "rake_bp", 500)), JInt(body, "min_gold"),
+                                            JInt(body, "max_gold"), JBool(body, "enabled", true), *s, &err);
+          if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
+          else setJson(200, OkObj({{"ok", true}}, trace));
         }
       }
     } else if (method == "GET" && path == "/admin/v1/pay/products") {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else
-        resp_body = OkJson(admin.ListProductsJson(), trace);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.ListProductsJson(), nullptr, false), trace));
     } else if (method == "POST" && path == "/admin/v1/pay/products") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        const bool ok = admin.UpsertProduct(static_cast<int>(ExtractJsonInt(body, "id", 0)),
-                                           static_cast<int>(ExtractJsonInt(body, "amount_fen", 0)),
-                                           static_cast<int>(ExtractJsonInt(body, "diamond", 0)),
-                                           static_cast<int>(ExtractJsonInt(body, "gift_diamond", 0)),
-                                           ExtractJsonBool(body, "enabled", true), *s, &err);
-        if (!ok) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        const bool ok = admin.UpsertProduct(static_cast<int>(JInt(body, "id")), static_cast<int>(JInt(body, "amount_fen")),
+                                           static_cast<int>(JInt(body, "diamond")),
+                                           static_cast<int>(JInt(body, "gift_diamond")), JBool(body, "enabled", true),
+                                           *s, &err);
+        if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "DELETE" && path.rfind("/admin/v1/pay/products/", 0) == 0) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int id = static_cast<int>(PathUid(path, "/admin/v1/pay/products/"));
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.DeleteProduct(id, *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.DeleteProduct(static_cast<int>(PathUid(path, "/admin/v1/pay/products/")), *s, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "GET" && path.rfind("/admin/v1/pay/orders", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else
-        resp_body = OkJson(admin.ListOrdersJson(1, 50), trace);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.ListOrdersJson(1, 50), nullptr, false), trace));
     } else if (method == "POST" && path == "/admin/v1/announce") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.Announce(ExtractJsonString(body, "message"), *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.Announce(JStr(body, "message"), *s, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "POST" && path == "/admin/v1/ops/maintain") {
       auto s = requireAdmin(AdminRole::kSuper);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         std::string err;
-        if (!admin.SetMaintainOp(ExtractJsonBool(body, "enabled", false), *s, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else
-          resp_body = OkJson("{\"ok\":true}", trace);
+        if (!admin.SetMaintainOp(JBool(body, "enabled"), *s, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "GET" && path.rfind("/admin/v1/audit", 0) == 0) {
       auto s = requireAdmin(AdminRole::kSuper);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else
-        resp_body = OkJson(admin.ListAuditJson(1, 50), trace);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(admin.ListAuditJson(1, 50), nullptr, false), trace));
     } else if (method == "GET" && path == "/admin/v1/activities") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        auto defs = activity.ListDefs(true);
-        std::ostringstream data;
-        data << "{\"items\":[";
-        for (size_t i = 0; i < defs.size(); ++i) {
-          if (i) data << ",";
-          data << "{\"id\":" << defs[i].id << ",\"type\":\"" << JsonEscape(defs[i].type) << "\",\"title\":\""
-               << JsonEscape(defs[i].title) << "\",\"rules_json\":" << defs[i].rules_json
-               << ",\"enabled\":" << (defs[i].enabled ? "true" : "false")
-               << ",\"claim_count\":" << activity.ClaimCount(defs[i].id) << "}";
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        json items = json::array();
+        for (const auto& d : activity.ListDefs(true)) {
+          items.push_back({{"id", d.id},
+                           {"type", d.type},
+                           {"title", d.title},
+                           {"rules_json", json::parse(d.rules_json, nullptr, false)},
+                           {"enabled", d.enabled},
+                           {"claim_count", activity.ClaimCount(d.id)}});
         }
-        data << "]}";
-        resp_body = OkJson(data.str(), trace);
+        setJson(200, OkObj({{"items", items}}, trace));
       }
     } else if ((method == "POST" || method == "PUT") && path == "/admin/v1/activities") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         ActivityDef d;
-        d.id = static_cast<int>(ExtractJsonInt(body, "id", 0));
-        d.type = ExtractJsonString(body, "type");
-        d.title = ExtractJsonString(body, "title");
-        // rules_json may be object — extract raw substring roughly
-        auto rp = body.find("\"rules_json\"");
-        if (rp != std::string::npos) {
-          auto colon = body.find(':', rp);
-          auto start = body.find_first_not_of(" \t", colon + 1);
-          if (start != std::string::npos && body[start] == '{') {
-            int depth = 0;
-            size_t i = start;
-            for (; i < body.size(); ++i) {
-              if (body[i] == '{') ++depth;
-              else if (body[i] == '}') {
-                --depth;
-                if (depth == 0) {
-                  d.rules_json = body.substr(start, i - start + 1);
-                  break;
-                }
-              }
-            }
-          } else {
-            d.rules_json = ExtractJsonString(body, "rules_json");
-            if (!d.rules_json.empty() && d.rules_json[0] != '{') d.rules_json = "{}";
-          }
-        }
-        if (d.rules_json.empty()) d.rules_json = "{}";
-        d.enabled = ExtractJsonBool(body, "enabled", true);
+        d.id = static_cast<int>(JInt(body, "id"));
+        d.type = JStr(body, "type");
+        d.title = JStr(body, "title");
+        if (body.contains("rules_json")) {
+          if (body["rules_json"].is_object() || body["rules_json"].is_array())
+            d.rules_json = body["rules_json"].dump();
+          else
+            d.rules_json = JStr(body, "rules_json", "{}");
+        } else
+          d.rules_json = "{}";
+        d.enabled = JBool(body, "enabled", true);
         std::string err;
-        if (!activity.UpsertDef(d, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else {
+        if (!activity.UpsertDef(d, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
           admin.Audit(s->admin_id, "upsert_activity", d.title, "", d.type);
-          resp_body = OkJson("{\"ok\":true}", trace);
+          setJson(200, OkObj({{"ok", true}}, trace));
         }
       }
     } else if (method == "POST" && path == "/admin/v1/activities/simulate_settle") {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
-        const int64_t uid = ExtractJsonInt(body, "uid", 0);
-        const int tid = static_cast<int>(ExtractJsonInt(body, "template_id", 1));
-        if (uid <= 0) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, "uid required");
-        } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int64_t uid = JInt(body, "uid");
+        const int tid = static_cast<int>(JInt(body, "template_id", 1));
+        if (uid <= 0) setJson(400, ErrObj(Err::kBadParam, trace, "uid required"));
+        else {
           try {
             activity.OnGameSettled(uid, tid);
           } catch (...) {
           }
           admin.Audit(s->admin_id, "simulate_settle", std::to_string(uid), "", std::to_string(tid));
-          resp_body = OkJson("{\"ok\":true}", trace);
+          setJson(200, OkObj({{"ok", true}}, trace));
         }
       }
     } else if (method == "GET" && path.rfind("/admin/v1/reports/", 0) == 0) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         const std::string kind = path.substr(std::string("/admin/v1/reports/").size());
         int limit = 5000;
         auto lp = query.find("limit=");
@@ -711,47 +489,159 @@ void HandleClient(socket_t client, MemoryStore& store, AuthService& auth, Wallet
           csv = admin.ExportClaimsCsv(limit);
           fname = "claims.csv";
         } else {
-          status = 404;
-          resp_body = ErrJson(Err::kNotFound, trace);
+          setJson(404, ErrObj(Err::kNotFound, trace));
+          return out;
         }
-        if (!fname.empty()) {
-          admin.Audit(s->admin_id, "export_report", fname, "", std::to_string(limit));
-          raw_http = HttpCsvResponse(fname, csv);
-        }
+        admin.Audit(s->admin_id, "export_report", fname, "", std::to_string(limit));
+        out.status = 200;
+        out.content_type = "text/csv; charset=utf-8";
+        out.content_disposition = "attachment; filename=\"" + fname + "\"";
+        out.body = std::move(csv);
       }
     } else if (method == "DELETE" && path.rfind("/admin/v1/activities/", 0) == 0) {
       auto s = requireAdmin(AdminRole::kOps);
-      if (!s) {
-        status = 403;
-        resp_body = ErrJson(Err::kForbidden, trace);
-      } else {
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
         const int id = static_cast<int>(PathUid(path, "/admin/v1/activities/"));
         std::string err;
-        if (!activity.SetEnabled(id, false, &err)) {
-          status = 400;
-          resp_body = ErrJson(Err::kBadParam, trace, err);
-        } else {
+        if (!activity.SetEnabled(id, false, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
           admin.Audit(s->admin_id, "disable_activity", std::to_string(id), "", "0");
-          resp_body = OkJson("{\"ok\":true}", trace);
+          setJson(200, OkObj({{"ok", true}}, trace));
         }
       }
     } else {
-      status = 404;
-      resp_body = ErrJson(Err::kNotFound, trace);
+      setJson(404, ErrObj(Err::kNotFound, trace));
     }
   } else {
-    status = 404;
-    resp_body = ErrJson(Err::kNotFound, trace);
+    setJson(404, ErrObj(Err::kNotFound, trace));
+  }
+  return out;
+}
+
+HttpResult HandleRequest(HttpApi* api, const http::request<http::string_body>& req) {
+  return Dispatch(req, api->store(), api->auth(), api->wallet(), api->pay(), api->admin(), api->activity(),
+                  api->mysql(), api->redis(), api->hub(), api->cfg());
+}
+
+std::shared_ptr<http::response<http::string_body>> MakeResponse(const http::request<http::string_body>& req,
+                                                                HttpResult result) {
+  auto res = std::make_shared<http::response<http::string_body>>(static_cast<http::status>(result.status),
+                                                                req.version());
+  res->set(http::field::server, "pandora");
+  res->set(http::field::content_type, result.content_type);
+  res->set(http::field::access_control_allow_origin, "*");
+  res->set(http::field::access_control_allow_headers, "Content-Type, Authorization");
+  res->set(http::field::access_control_allow_methods, "GET, POST, PUT, DELETE, OPTIONS");
+  if (!result.content_disposition.empty()) res->set(http::field::content_disposition, result.content_disposition);
+  res->keep_alive(false);
+  res->body() = std::move(result.body);
+  res->prepare_payload();
+  return res;
+}
+
+class PlainHttpSession : public std::enable_shared_from_this<PlainHttpSession> {
+ public:
+  PlainHttpSession(tcp::socket socket, HttpApi* api) : stream_(std::move(socket)), api_(api) {}
+
+  void Run() {
+    http::async_read(stream_, buffer_, req_,
+                     beast::bind_front_handler(&PlainHttpSession::OnRead, shared_from_this()));
   }
 
-  if (!raw_http.empty()) {
-    send(client, raw_http.c_str(), static_cast<int>(raw_http.size()), 0);
-  } else {
-    const auto resp = HttpResponse(status, resp_body);
-    send(client, resp.c_str(), static_cast<int>(resp.size()), 0);
+ private:
+  void OnRead(beast::error_code ec, std::size_t) {
+    if (ec) return;
+    if (api_->cfg().net.force_tls) {
+      stream_.socket().shutdown(tcp::socket::shutdown_both, ec);
+      return;
+    }
+    auto res = MakeResponse(req_, HandleRequest(api_, req_));
+    auto self = shared_from_this();
+    http::async_write(stream_, *res, [self, res](beast::error_code, std::size_t) {
+      beast::error_code ignored;
+      self->stream_.socket().shutdown(tcp::socket::shutdown_send, ignored);
+    });
   }
-  closesocket(client);
-}
+
+  beast::tcp_stream stream_;
+  beast::flat_buffer buffer_;
+  http::request<http::string_body> req_;
+  HttpApi* api_;
+};
+
+class SslHttpSession : public std::enable_shared_from_this<SslHttpSession> {
+ public:
+  SslHttpSession(tcp::socket socket, ssl::context& ctx, HttpApi* api)
+      : stream_(std::move(socket), ctx), api_(api) {}
+
+  void Run() {
+    stream_.async_handshake(ssl::stream_base::server,
+                            beast::bind_front_handler(&SslHttpSession::OnHandshake, shared_from_this()));
+  }
+
+ private:
+  void OnHandshake(beast::error_code ec) {
+    if (ec) {
+      PLOG_WARN("https handshake failed: " << ec.message());
+      return;
+    }
+    http::async_read(stream_, buffer_, req_,
+                     beast::bind_front_handler(&SslHttpSession::OnRead, shared_from_this()));
+  }
+
+  void OnRead(beast::error_code ec, std::size_t) {
+    if (ec) return;
+    auto res = MakeResponse(req_, HandleRequest(api_, req_));
+    auto self = shared_from_this();
+    http::async_write(stream_, *res, [self, res](beast::error_code, std::size_t) {
+      beast::error_code ignored;
+      self->stream_.shutdown(ignored);
+    });
+  }
+
+  ssl::stream<tcp::socket> stream_;
+  beast::flat_buffer buffer_;
+  http::request<http::string_body> req_;
+  HttpApi* api_;
+};
+
+class HttpListener : public std::enable_shared_from_this<HttpListener> {
+ public:
+  HttpListener(net::io_context& ioc, tcp::endpoint ep, HttpApi* api, std::shared_ptr<ssl::context> tls)
+      : ioc_(ioc), acceptor_(ioc), api_(api), tls_(std::move(tls)) {
+    beast::error_code ec;
+    acceptor_.open(ep.protocol(), ec);
+    acceptor_.set_option(net::socket_base::reuse_address(true), ec);
+    acceptor_.bind(ep, ec);
+    if (ec) {
+      PLOG_ERROR("http bind failed: " << ec.message());
+      return;
+    }
+    acceptor_.listen(net::socket_base::max_listen_connections, ec);
+  }
+
+  void Run() { DoAccept(); }
+
+ private:
+  void DoAccept() {
+    acceptor_.async_accept(net::make_strand(ioc_), [self = shared_from_this()](beast::error_code ec, tcp::socket socket) {
+      if (!ec) {
+        if (self->tls_) {
+          std::make_shared<SslHttpSession>(std::move(socket), *self->tls_, self->api_)->Run();
+        } else {
+          std::make_shared<PlainHttpSession>(std::move(socket), self->api_)->Run();
+        }
+      }
+      self->DoAccept();
+    });
+  }
+
+  net::io_context& ioc_;
+  tcp::acceptor acceptor_;
+  HttpApi* api_;
+  std::shared_ptr<ssl::context> tls_;
+};
 
 }  // namespace
 
@@ -769,38 +659,24 @@ HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletSer
       redis_(redis),
       hub_(hub) {}
 
-void HttpApi::Run() {
-  WSADATA wsa;
-  WSAStartup(MAKEWORD(2, 2), &wsa);
-  if (!pool_.Start(cfg_.net.iocp_workers, [this](ULONG_PTR key, DWORD, OVERLAPPED*, bool) {
-        HandleClient(static_cast<socket_t>(key), store_, auth_, wallet_, pay_, admin_, activity_, mysql_, redis_, hub_,
-                     cfg_);
-      })) {
-    PLOG_ERROR("HTTP IOCP start failed");
-    return;
+void HttpApi::Start(boost::asio::io_context& ioc, const std::filesystem::path& conf_dir) {
+  std::shared_ptr<ssl::context> tls;
+  try {
+    tls = MakeTlsContext(cfg_.net, conf_dir);
+  } catch (const std::exception& ex) {
+    PLOG_ERROR("TLS init failed: " << ex.what());
+    throw;
   }
-  socket_t listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  BOOL yes = 1;
-  setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(static_cast<u_short>(cfg_.net.http_port));
-  addr.sin_addr.s_addr = INADDR_ANY;
-  if (bind(listen_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    PLOG_ERROR("http bind failed port=" << cfg_.net.http_port);
-    return;
+  if (cfg_.net.force_tls && !tls) {
+    PLOG_ERROR("force_tls=true but tls.enabled=false; refusing plaintext HTTP");
+    throw std::runtime_error("force_tls requires tls.enabled");
   }
-  listen(listen_sock, SOMAXCONN);
-  PLOG_INFO("HTTP IOCP listening on :" << cfg_.net.http_port << " workers=" << pool_.WorkerCount());
-  while (true) {
-    socket_t client = accept(listen_sock, nullptr, nullptr);
-    if (client == INVALID_SOCKET) continue;
-    if (!pool_.Post(static_cast<ULONG_PTR>(client))) {
-      closesocket(client);
-    }
-  }
+  auto const address = net::ip::make_address(cfg_.net.http_host == "0.0.0.0" ? "0.0.0.0" : cfg_.net.http_host);
+  auto listener =
+      std::make_shared<HttpListener>(ioc, tcp::endpoint{address, static_cast<unsigned short>(cfg_.net.http_port)}, this, tls);
+  listener->Run();
+  PLOG_INFO((tls ? "HTTPS" : "HTTP") << " Beast listening on :" << cfg_.net.http_port
+                                     << " workers=" << cfg_.net.iocp_workers);
 }
 
-
 }  // namespace pandora
-

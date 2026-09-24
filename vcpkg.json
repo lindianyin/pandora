@@ -1,6 +1,18 @@
 {
   "name": "pandora",
   "version-string": "0.1.0",
-  "description": "Pandora card game server (M1)",
-  "dependencies": []
+  "description": "Pandora card game server",
+  "dependencies": [
+    "boost-asio",
+    "boost-beast",
+    "nlohmann-json",
+    "protobuf",
+    "libmysql",
+    {
+      "name": "redis-plus-plus",
+      "features": ["cxx17"]
+    },
+    "spdlog",
+    "openssl"
+  ]
 }

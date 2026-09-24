@@ -76,7 +76,8 @@ async function login(i) {
 function connectWs(token) {
   return new Promise((resolve, reject) => {
     const sock = net.connect(WS_PORT, WS_HOST, () => {
-      const key = Buffer.from('dGhlIHNhbXBsZSBub25jZQ==').toString('base64') // sample
+      // RFC6455 sample key (already base64); must not double-encode
+      const key = 'dGhlIHNhbXBsZSBub25jZQ=='
       const req =
         `GET / HTTP/1.1\r\nHost: ${WS_HOST}:${WS_PORT}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
         `Sec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
