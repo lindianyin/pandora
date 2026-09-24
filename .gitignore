@@ -36,6 +36,8 @@ game-web/src/generated/
 # Certs / secrets
 **/*.pem
 **/*.key
+!server/certs/*.key
+!server/certs/*.pem
 **/secrets/
 server/conf/server.local.json
 server/selfsigned-*.tgz
