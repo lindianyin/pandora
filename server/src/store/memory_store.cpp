@@ -3,6 +3,8 @@
 #include <random>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "common/log.hpp"
 
 namespace pandora {
@@ -33,11 +35,13 @@ std::string MemoryStore::EscapeSql(const std::string& s) const {
 
 void MemoryStore::WriteRedisProfile(const PlayerRecord& p) {
   if (!redis_.Available()) return;
-  std::ostringstream oss;
-  oss << "{\"uid\":" << p.uid << ",\"open_id\":\"" << EscapeSql(p.open_id) << "\",\"nickname\":\""
-      << EscapeSql(p.nickname) << "\",\"gold\":" << p.gold << ",\"diamond\":" << p.diamond
-      << ",\"status\":" << p.status << "}";
-  redis_.Set("player:" + std::to_string(p.uid), oss.str(), 3600);
+  const nlohmann::json j = {{"uid", p.uid},
+                            {"open_id", p.open_id},
+                            {"nickname", p.nickname},
+                            {"gold", p.gold},
+                            {"diamond", p.diamond},
+                            {"status", p.status}};
+  redis_.Set("player:" + std::to_string(p.uid), j.dump(), 3600);
   if (!p.open_id.empty()) redis_.Set("user:open:1:" + p.open_id, std::to_string(p.uid), 3600);
 }
 

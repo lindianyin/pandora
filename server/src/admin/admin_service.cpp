@@ -3,6 +3,8 @@
 #include <random>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "common/errors.hpp"
 #include "common/log.hpp"
 #include "common/sha1.hpp"
@@ -11,28 +13,13 @@
 namespace pandora {
 namespace {
 
-std::string JsonStr(const std::string& s) {
-  std::string o;
-  o.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '\\':
-        o += "\\\\";
-        break;
-      case '"':
-        o += "\\\"";
-        break;
-      case '\n':
-        o += "\\n";
-        break;
-      case '\r':
-        o += "\\r";
-        break;
-      default:
-        o.push_back(c);
-    }
-  }
-  return o;
+using json = nlohmann::json;
+
+json ParseJsonOr(const std::string& s, json fallback) {
+  if (s.empty()) return fallback;
+  auto j = json::parse(s, nullptr, false);
+  if (j.is_discarded()) return fallback;
+  return j;
 }
 
 }  // namespace
@@ -264,12 +251,14 @@ std::string AdminService::DashboardJson() const {
         }
     }
   }
-  std::ostringstream oss;
-  oss << "{\"ccu\":" << hub_.OnlineCount() << ",\"players\":" << players << ",\"rounds\":" << rounds
-      << ",\"orders\":" << orders << ",\"maintain\":" << (IsMaintain() ? "true" : "false")
-      << ",\"mysql\":" << (mysql_.Available() ? "true" : "false")
-      << ",\"redis\":" << (redis_.Available() ? "true" : "false") << "}";
-  return oss.str();
+  return json{{"ccu", hub_.OnlineCount()},
+              {"players", players},
+              {"rounds", rounds},
+              {"orders", orders},
+              {"maintain", IsMaintain()},
+              {"mysql", mysql_.Available()},
+              {"redis", redis_.Available()}}
+      .dump();
 }
 
 std::string AdminService::ListPlayersJson(const std::string& q, int page, int page_size) const {
@@ -308,19 +297,17 @@ std::string AdminService::ListPlayersJson(const std::string& q, int page, int pa
   }
   const int total = static_cast<int>(filtered.size());
   const int start = (page - 1) * page_size;
-  std::ostringstream oss;
-  oss << "{\"total\":" << total << ",\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
     const auto& p = filtered[static_cast<size_t>(i)];
-    if (!first) oss << ",";
-    first = false;
-    oss << "{\"uid\":" << p.uid << ",\"nickname\":\"" << JsonStr(p.nickname) << "\",\"gold\":" << p.gold
-        << ",\"diamond\":" << p.diamond << ",\"status\":" << p.status
-        << ",\"online\":" << (hub_.IsOnline(p.uid) ? "true" : "false") << "}";
+    items.push_back({{"uid", p.uid},
+                     {"nickname", p.nickname},
+                     {"gold", p.gold},
+                     {"diamond", p.diamond},
+                     {"status", p.status},
+                     {"online", hub_.IsOnline(p.uid)}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
 
 bool AdminService::Kick(int64_t uid, const AdminSession& admin, std::string* err) {
@@ -362,7 +349,7 @@ bool AdminService::WalletAdjust(int64_t uid, int currency, int64_t delta, const 
   }
   if (balance_out) *balance_out = r.balance;
   Audit(admin.admin_id, "wallet_adjust", std::to_string(uid), "",
-        "{\"currency\":" + std::to_string(currency) + ",\"delta\":" + std::to_string(delta) + "}");
+        json{{"currency", currency}, {"delta", delta}}.dump());
   return true;
 }
 
@@ -400,19 +387,18 @@ std::string AdminService::ListLedgersJson(int64_t uid, int page, int page_size) 
   }
   const int total = static_cast<int>(all.size());
   const int start = (page - 1) * page_size;
-  std::ostringstream oss;
-  oss << "{\"total\":" << total << ",\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
     const auto& e = all[static_cast<size_t>(i)];
-    if (!first) oss << ",";
-    first = false;
-    oss << "{\"id\":" << e.id << ",\"uid\":" << e.uid << ",\"currency\":" << e.currency << ",\"delta\":" << e.delta
-        << ",\"balance_after\":" << e.balance_after << ",\"biz_type\":\"" << JsonStr(e.biz_type)
-        << "\",\"idempotent_key\":\"" << JsonStr(e.idempotent_key) << "\"}";
+    items.push_back({{"id", e.id},
+                     {"uid", e.uid},
+                     {"currency", e.currency},
+                     {"delta", e.delta},
+                     {"balance_after", e.balance_after},
+                     {"biz_type", e.biz_type},
+                     {"idempotent_key", e.idempotent_key}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
 
 std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) const {
@@ -453,35 +439,33 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
   if (page_size < 1) page_size = 20;
   const int total = static_cast<int>(rounds.size());
   const int start = (page - 1) * page_size;
-  std::ostringstream oss;
-  oss << "{\"total\":" << total << ",\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
     const auto& m = rounds[static_cast<size_t>(i)];
-    if (!first) oss << ",";
-    first = false;
-    const std::string pj = m.players_json.empty() ? "[]" : m.players_json;
-    oss << "{\"round_id\":" << m.round_id << ",\"room_id\":" << m.room_id << ",\"template_id\":" << m.template_id
-        << ",\"players_json\":" << pj << ",\"base_score\":" << m.base_score << ",\"multiplier\":" << m.multiplier
-        << "}";
+    items.push_back({{"round_id", m.round_id},
+                     {"room_id", m.room_id},
+                     {"template_id", m.template_id},
+                     {"players_json", ParseJsonOr(m.players_json, json::array())},
+                     {"base_score", m.base_score},
+                     {"multiplier", m.multiplier}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
 
 std::string AdminService::ListTemplatesJson() const {
   if (mysql_.Available()) lobby_.ReloadFromDb(mysql_);
   const auto& ts = lobby_.Templates();
-  std::ostringstream oss;
-  oss << "{\"items\":[";
-  for (size_t i = 0; i < ts.size(); ++i) {
-    if (i) oss << ",";
-    oss << "{\"id\":" << ts[i].id << ",\"name\":\"" << JsonStr(ts[i].name) << "\",\"base_score\":" << ts[i].base_score
-        << ",\"min_gold\":" << ts[i].min_gold << ",\"max_gold\":" << ts[i].max_gold
-        << ",\"enabled\":" << (ts[i].enabled ? "true" : "false") << ",\"rake_bp\":" << lobby_.RakeBp(ts[i].id) << "}";
+  json items = json::array();
+  for (const auto& t : ts) {
+    items.push_back({{"id", t.id},
+                     {"name", t.name},
+                     {"base_score", t.base_score},
+                     {"min_gold", t.min_gold},
+                     {"max_gold", t.max_gold},
+                     {"enabled", t.enabled},
+                     {"rake_bp", lobby_.RakeBp(t.id)}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"items", std::move(items)}}.dump();
 }
 
 bool AdminService::PutTemplate(int id, const std::string& name, int base_score, int rake_bp, int64_t min_gold,
@@ -512,16 +496,15 @@ bool AdminService::PutTemplate(int id, const std::string& name, int base_score, 
 std::string AdminService::ListProductsJson() const {
   if (mysql_.Available()) pay_.ReloadFromDb(mysql_);
   auto products = pay_.ListProducts(true);
-  std::ostringstream oss;
-  oss << "{\"items\":[";
-  for (size_t i = 0; i < products.size(); ++i) {
-    if (i) oss << ",";
-    oss << "{\"id\":" << products[i].id << ",\"amount_fen\":" << products[i].amount_fen
-        << ",\"diamond\":" << products[i].diamond << ",\"gift_diamond\":" << products[i].gift_diamond
-        << ",\"enabled\":" << (products[i].enabled ? "true" : "false") << "}";
+  json items = json::array();
+  for (const auto& p : products) {
+    items.push_back({{"id", p.id},
+                     {"amount_fen", p.amount_fen},
+                     {"diamond", p.diamond},
+                     {"gift_diamond", p.gift_diamond},
+                     {"enabled", p.enabled}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"items", std::move(items)}}.dump();
 }
 
 bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled, const AdminSession& admin,
@@ -576,18 +559,17 @@ std::string AdminService::ListOrdersJson(int page, int page_size) const {
   auto orders = pay_.ListOrders(500);
   const int total = static_cast<int>(orders.size());
   const int start = (page - 1) * page_size;
-  std::ostringstream oss;
-  oss << "{\"total\":" << total << ",\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
     const auto& o = orders[static_cast<size_t>(i)];
-    if (!first) oss << ",";
-    first = false;
-    oss << "{\"order_id\":\"" << JsonStr(o.order_id) << "\",\"uid\":" << o.uid << ",\"product_id\":" << o.product_id
-        << ",\"amount_fen\":" << o.amount_fen << ",\"diamond\":" << o.diamond << ",\"status\":" << o.status << "}";
+    items.push_back({{"order_id", o.order_id},
+                     {"uid", o.uid},
+                     {"product_id", o.product_id},
+                     {"amount_fen", o.amount_fen},
+                     {"diamond", o.diamond},
+                     {"status", o.status}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
 
 bool AdminService::Announce(const std::string& message, const AdminSession& admin, std::string* err) {
@@ -648,19 +630,17 @@ std::string AdminService::ListAuditJson(int page, int page_size) const {
   }
   const int total = static_cast<int>(audits.size());
   const int start = (page - 1) * page_size;
-  std::ostringstream oss;
-  oss << "{\"total\":" << total << ",\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
     const auto& a = audits[static_cast<size_t>(i)];
-    if (!first) oss << ",";
-    first = false;
-    oss << "{\"admin_id\":" << a.admin_id << ",\"action\":\"" << JsonStr(a.action) << "\",\"target\":\""
-        << JsonStr(a.target) << "\",\"before\":\"" << JsonStr(a.before) << "\",\"after\":\"" << JsonStr(a.after)
-        << "\",\"created_at\":\"" << JsonStr(a.created_at) << "\"}";
+    items.push_back({{"admin_id", a.admin_id},
+                     {"action", a.action},
+                     {"target", a.target},
+                     {"before", a.before},
+                     {"after", a.after},
+                     {"created_at", a.created_at}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
 
 std::string AdminService::ExportLedgersCsv(int limit) const {

@@ -4,6 +4,8 @@
 #include <random>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "admin/admin_service.hpp"
 #include "activity/activity_service.hpp"
 #include "common/errors.hpp"
@@ -536,14 +538,11 @@ void DdzClassicSimple::DoSettle(bool landlord_win) {
   int tid = 1;
   if (auto* room = rooms_.FindRoomUnlocked(room_id_)) tid = room->template_id;
   if (rooms_.Admin()) {
-    std::ostringstream pj;
-    pj << "[";
+    nlohmann::json players = nlohmann::json::array();
     for (int i = 0; i < 3; ++i) {
-      if (i) pj << ",";
-      pj << "{\"uid\":" << uids_[i] << ",\"delta\":" << deltas[i] << "}";
+      players.push_back({{"uid", uids_[i]}, {"delta", deltas[i]}});
     }
-    pj << "]";
-    rooms_.Admin()->RecordRound(round_id_, room_id_, tid, pj.str(), cfg_.base_score, mult);
+    rooms_.Admin()->RecordRound(round_id_, room_id_, tid, players.dump(), cfg_.base_score, mult);
   }
   if (rooms_.Activity()) {
     for (int64_t uid : AllUids()) {

@@ -5,6 +5,8 @@
 #include <ctime>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "common/errors.hpp"
 #include "common/log.hpp"
 #include "common/proto_wire.hpp"
@@ -12,13 +14,13 @@
 namespace pandora {
 namespace {
 
-std::string JsonEscape(const std::string& s) {
-  std::string o;
-  for (char c : s) {
-    if (c == '\\' || c == '"') o.push_back('\\');
-    o.push_back(c);
-  }
-  return o;
+using json = nlohmann::json;
+
+json ParseJsonOr(const std::string& s, json fallback) {
+  if (s.empty()) return fallback;
+  auto j = json::parse(s, nullptr, false);
+  if (j.is_discarded()) return fallback;
+  return j;
 }
 
 }  // namespace
@@ -414,13 +416,12 @@ void ActivityService::OnLogin(int64_t uid) {
       const std::string today = TodayKey();
       const std::string last = ExtractStr(prog, "last_sign_day", "");
       const bool signed_today = (last == today);
-      std::ostringstream oss;
-      oss << "{\"last_sign_day\":\"" << (last.empty() ? "" : last) << "\",\"signed_today\":"
-          << (signed_today ? "true" : "false") << "}";
-      if (prog.find("last_sign_day") == std::string::npos) SaveProgress(uid, d.id, oss.str());
+      const json progress = {{"last_sign_day", last}, {"signed_today", signed_today}};
+      const std::string progress_s = progress.dump();
+      if (prog.find("last_sign_day") == std::string::npos) SaveProgress(uid, d.id, progress_s);
       const std::string rk = ExtractStr(d.rules_json, "reward_key", "daily");
       const bool claimable = !signed_today && !HasClaimed(uid, d.id, rk + ":" + today);
-      PushUpdate(uid, d, oss.str(), claimable);
+      PushUpdate(uid, d, progress_s, claimable);
     }
   } catch (const std::exception& e) {
     PLOG_WARN("OnLogin activity err: " << e.what());
@@ -437,12 +438,12 @@ void ActivityService::OnGameSettled(int64_t uid, int template_id) {
       const int target = ExtractInt(d.rules_json, "target_games", 3);
       auto prog = LoadProgress(uid, d.id);
       int games = ExtractInt(prog, "games", 0) + 1;
-      std::ostringstream oss;
-      oss << "{\"games\":" << games << ",\"target\":" << target << "}";
-      SaveProgress(uid, d.id, oss.str());
+      const json progress = {{"games", games}, {"target", target}};
+      const std::string progress_s = progress.dump();
+      SaveProgress(uid, d.id, progress_s);
       const std::string rk = ExtractStr(d.rules_json, "reward_key", "games_3");
       const bool claimable = games >= target && !HasClaimed(uid, d.id, rk);
-      PushUpdate(uid, d, oss.str(), claimable);
+      PushUpdate(uid, d, progress_s, claimable);
     }
   } catch (const std::exception& e) {
     PLOG_WARN("OnGameSettled activity err: " << e.what());
@@ -452,9 +453,7 @@ void ActivityService::OnGameSettled(int64_t uid, int template_id) {
 }
 
 std::string ActivityService::ListForPlayerJson(int64_t uid) {
-  std::ostringstream oss;
-  oss << "{\"items\":[";
-  bool first = true;
+  json items = json::array();
   for (const auto& d : ListDefs(false)) {
     if (!InWindow(d)) continue;
     auto prog = LoadProgress(uid, d.id);
@@ -476,30 +475,29 @@ std::string ActivityService::ListForPlayerJson(int64_t uid) {
       const int stock = ReadStock(d.id);
       claimable = !claimed && stock > 0;
       if (prog == "{}") {
-        std::ostringstream p;
-        p << "{\"stock_left\":" << stock << "}";
-        prog = p.str();
+        prog = json{{"stock_left", stock}}.dump();
       }
     }
-    if (!first) oss << ",";
-    first = false;
-    oss << "{\"id\":" << d.id << ",\"type\":\"" << JsonEscape(d.type) << "\",\"title\":\"" << JsonEscape(d.title)
-        << "\",\"rules_json\":" << d.rules_json << ",\"progress_json\":" << (prog.empty() ? "{}" : prog)
-        << ",\"claimable\":" << (claimable ? "true" : "false") << ",\"claimed\":" << (claimed ? "true" : "false")
-        << ",\"reward_key\":\"" << JsonEscape(rk) << "\"}";
+    items.push_back({{"id", d.id},
+                     {"type", d.type},
+                     {"title", d.title},
+                     {"rules_json", ParseJsonOr(d.rules_json, json::object())},
+                     {"progress_json", ParseJsonOr(prog.empty() ? "{}" : prog, json::object())},
+                     {"claimable", claimable},
+                     {"claimed", claimed},
+                     {"reward_key", rk}});
   }
-  oss << "]}";
-  return oss.str();
+  return json{{"items", std::move(items)}}.dump();
 }
 
 std::string ActivityService::ProgressJson(int64_t uid, int activity_id) {
   auto def = GetDef(activity_id);
-  if (!def) return "{\"error\":\"not found\"}";
+  if (!def) return json{{"error", "not found"}}.dump();
   auto prog = LoadProgress(uid, activity_id);
-  std::ostringstream oss;
-  oss << "{\"activity_id\":" << activity_id << ",\"type\":\"" << JsonEscape(def->type) << "\",\"progress_json\":"
-      << (prog.empty() ? "{}" : prog) << "}";
-  return oss.str();
+  return json{{"activity_id", activity_id},
+              {"type", def->type},
+              {"progress_json", ParseJsonOr(prog.empty() ? "{}" : prog, json::object())}}
+      .dump();
 }
 
 ClaimResult ActivityService::Claim(int64_t uid, int activity_id, const std::string& reward_key_in) {
@@ -568,9 +566,7 @@ ClaimResult ActivityService::Claim(int64_t uid, int activity_id, const std::stri
     }
     MarkClaimed(uid, activity_id, claim_key);
     if (def->type == "sign") {
-      std::ostringstream oss;
-      oss << "{\"last_sign_day\":\"" << TodayKey() << "\",\"signed_today\":true}";
-      SaveProgress(uid, activity_id, oss.str());
+      SaveProgress(uid, activity_id, json{{"last_sign_day", TodayKey()}, {"signed_today", true}}.dump());
     }
     r.ok = true;
     r.balance = adj.balance;
