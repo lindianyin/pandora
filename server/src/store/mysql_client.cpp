@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include "common/log.hpp"
@@ -19,6 +20,12 @@ namespace pandora {
 namespace {
 
 thread_local std::string g_mysql_last_error;
+
+void HardCloseMysql(MYSQL* mysql) {
+  if (!mysql) return;
+  // Bound read/write timeouts (set at connect) keep COM_QUIT from hanging long.
+  mysql_close(mysql);
+}
 
 std::string Part(const std::string& dsn, const char* key, const std::string& def) {
   const std::string needle = std::string(key) + "=";
@@ -115,17 +122,31 @@ MysqlClient::MysqlClient(std::string dsn, int pool_size) : dsn_(std::move(dsn)) 
 }
 
 MysqlClient::~MysqlClient() {
+  std::vector<MYSQL*> to_close;
   {
     std::unique_lock<std::mutex> lk(mu_);
     stopping_ = true;
     cv_.notify_all();
-    cv_.wait_for(lk, std::chrono::seconds(5), [this] { return borrowed_ == 0; });
+    // Borrowed RAII should release quickly; do not stall shutdown for seconds.
+    cv_.wait_for(lk, std::chrono::milliseconds(100), [this] { return borrowed_ == 0; });
+    to_close.reserve(slots_.size());
     for (auto& slot : slots_) {
-      CloseOne(slot.mysql);
+      if (slot.mysql) {
+        to_close.push_back(slot.mysql);
+        slot.mysql = nullptr;
+      }
       slot.busy = false;
     }
+    borrowed_ = 0;
   }
   available_.store(false, std::memory_order_relaxed);
+  // Close in parallel — serial mysql_close to Docker/MySQL on Windows is often multi-second.
+  std::vector<std::thread> closers;
+  closers.reserve(to_close.size());
+  for (MYSQL* m : to_close) {
+    closers.emplace_back([m]() { HardCloseMysql(m); });
+  }
+  for (auto& t : closers) t.join();
 }
 
 void MysqlClient::ParseDsn() {
@@ -145,6 +166,11 @@ MYSQL* MysqlClient::ConnectOne() {
     SetError("mysql_init failed");
     return nullptr;
   }
+  unsigned int connect_timeout = 2;
+  unsigned int rw_timeout = 1;
+  mysql_options(m, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout);
+  mysql_options(m, MYSQL_OPT_READ_TIMEOUT, &rw_timeout);
+  mysql_options(m, MYSQL_OPT_WRITE_TIMEOUT, &rw_timeout);
   // Prefer prepared statements; multi-statements remain for legacy Exec paths.
   if (!mysql_real_connect(m, host_.c_str(), user_.c_str(), password_.c_str(), database_.c_str(),
                           static_cast<unsigned>(port_), nullptr, CLIENT_MULTI_STATEMENTS)) {
@@ -158,10 +184,9 @@ MYSQL* MysqlClient::ConnectOne() {
 }
 
 void MysqlClient::CloseOne(MYSQL*& mysql) {
-  if (mysql) {
-    mysql_close(mysql);
-    mysql = nullptr;
-  }
+  if (!mysql) return;
+  HardCloseMysql(mysql);
+  mysql = nullptr;
 }
 
 bool MysqlClient::ReconnectSlot(std::size_t index) {

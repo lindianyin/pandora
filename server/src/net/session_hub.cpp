@@ -68,6 +68,19 @@ void SessionHub::Kick(int64_t uid, int32_t reason, const std::string& message) {
   }
 }
 
+void SessionHub::CloseAll() {
+  std::vector<std::shared_ptr<ISessionConn>> conns;
+  for (auto& sh : shards_) {
+    std::lock_guard<std::mutex> lk(sh.mu);
+    conns.reserve(conns.size() + sh.by_uid.size());
+    for (auto& kv : sh.by_uid) conns.push_back(std::move(kv.second));
+    sh.by_uid.clear();
+  }
+  for (auto& c : conns) {
+    if (c) c->Close();
+  }
+}
+
 size_t SessionHub::OnlineCount() {
   size_t n = 0;
   for (auto& sh : shards_) {

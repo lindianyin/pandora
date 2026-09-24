@@ -1,8 +1,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -27,15 +29,12 @@
 
 namespace {
 std::atomic_bool g_running{true};
-void OnSignal(int) { g_running = false; }
+std::mutex g_tick_mu;
+std::condition_variable g_tick_cv;
 }  // namespace
 
 int main(int argc, char** argv) {
   using namespace pandora;
-  std::signal(SIGINT, OnSignal);
-#ifdef _WIN32
-  std::signal(SIGTERM, OnSignal);
-#endif
 
   std::string conf_path = "conf/server.json";
   if (argc >= 2) conf_path = argv[1];
@@ -46,6 +45,8 @@ int main(int argc, char** argv) {
 
   auto cfg = LoadConfig(conf_path);
   const auto conf_dir = std::filesystem::path(conf_path).parent_path();
+  const auto log_file = (conf_dir / ".." / "logs" / "pandora.log").lexically_normal();
+  InitLogging(log_file);
   PLOG_INFO("pandora-server Beast stack starting, config=" << conf_path);
 
   MysqlClient mysql(cfg.mysql.dsn, cfg.mysql.pool_size);
@@ -83,13 +84,24 @@ int main(int argc, char** argv) {
   http.Start(http_ioc, conf_dir);
   ws.Start(ws_ioc, conf_dir);
 
+  // Asio signal_set: one Ctrl+C stops both io_contexts immediately (no std::signal one-shot).
+  boost::asio::signal_set signals(http_ioc, SIGINT, SIGTERM);
+  signals.async_wait([&](const boost::system::error_code& ec, int) {
+    if (ec) return;
+    PLOG_INFO("signal received, stopping");
+    g_running = false;
+    g_tick_cv.notify_all();
+    runtime.hub.CloseAll();
+    http_ioc.stop();
+    ws_ioc.stop();
+  });
+
   std::thread tick_thread([&]() {
     while (g_running) {
       runtime.Tick();
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      std::unique_lock<std::mutex> lk(g_tick_mu);
+      g_tick_cv.wait_for(lk, std::chrono::milliseconds(100), [] { return !g_running.load(); });
     }
-    http_ioc.stop();
-    ws_ioc.stop();
   });
 
   std::vector<std::thread> pool;
@@ -111,6 +123,7 @@ int main(int argc, char** argv) {
 
   for (auto& t : pool) t.join();
   g_running = false;
+  g_tick_cv.notify_all();
   if (tick_thread.joinable()) tick_thread.join();
   persist.Stop();
   PLOG_INFO("shutting down");

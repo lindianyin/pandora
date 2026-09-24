@@ -198,10 +198,7 @@ class WsSessionBase : public ISessionConn {
 
   void Close() override {
     auto sp = self().Shared();
-    net::post(self().Strand(), [sp]() {
-      beast::error_code ec;
-      sp->Ws().close(websocket::close_code::normal, ec);
-    });
+    net::post(self().Strand(), [sp]() { sp->Fail(); });
   }
 
  protected:
@@ -313,15 +310,14 @@ class WsListener : public std::enable_shared_from_this<WsListener> {
  private:
   void DoAccept() {
     acceptor_.async_accept([self = shared_from_this()](beast::error_code ec, tcp::socket socket) {
-      if (!ec) {
-        if (self->tls_) {
-          std::make_shared<SslWsSession>(std::move(socket), *self->tls_, self->auth_, self->runtime_, self->admin_,
-                                         self->cfg_)
-              ->Run();
-        } else {
-          std::make_shared<PlainWsSession>(std::move(socket), self->auth_, self->runtime_, self->admin_, self->cfg_)
-              ->Run();
-        }
+      if (ec) return;
+      if (self->tls_) {
+        std::make_shared<SslWsSession>(std::move(socket), *self->tls_, self->auth_, self->runtime_, self->admin_,
+                                       self->cfg_)
+            ->Run();
+      } else {
+        std::make_shared<PlainWsSession>(std::move(socket), self->auth_, self->runtime_, self->admin_, self->cfg_)
+            ->Run();
       }
       self->DoAccept();
     });

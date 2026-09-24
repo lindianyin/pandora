@@ -28,6 +28,7 @@ class SessionHub {
   void BroadcastAll(uint32_t msg_id, const std::vector<uint8_t>& body);
   bool IsOnline(int64_t uid);
   void Kick(int64_t uid, int32_t reason, const std::string& message);
+  void CloseAll();
   size_t OnlineCount();
 
  private:
