@@ -57,6 +57,7 @@ add_executable(pandora-server
   src/main.cpp
   src/common/config.cpp
   src/common/proto_wire.cpp
+  src/common/async_worker.cpp
   src/net/frame.cpp
   src/net/http_api.cpp
   src/net/ws_server.cpp

@@ -38,8 +38,15 @@ std::string JsonStr(const std::string& s) {
 }  // namespace
 
 AdminService::AdminService(MysqlClient& mysql, RedisClient& redis, MemoryStore& store, WalletService& wallet,
-                           PayService& pay, LobbyService& lobby, SessionHub& hub)
-    : mysql_(mysql), redis_(redis), store_(store), wallet_(wallet), pay_(pay), lobby_(lobby), hub_(hub) {}
+                           PayService& pay, LobbyService& lobby, SessionHub& hub, AsyncWorker& persist)
+    : mysql_(mysql),
+      redis_(redis),
+      store_(store),
+      wallet_(wallet),
+      pay_(pay),
+      lobby_(lobby),
+      hub_(hub),
+      persist_(persist) {}
 
 std::string AdminService::HashPassword(const std::string& password) const {
   return crypto::Sha1Hex("pandora:" + password);
@@ -68,8 +75,8 @@ void AdminService::Bootstrap() {
   if (mysql_.Available()) {
     auto rows = mysql_.Query("SELECT id FROM admin_user WHERE username='admin' LIMIT 1");
     if (rows && rows->empty()) {
-      mysql_.Exec("INSERT INTO admin_user(username,password_hash,role,enabled) VALUES('admin','" + hash +
-                  "','super',1)");
+      mysql_.ExecBind("INSERT INTO admin_user(username,password_hash,role,enabled) VALUES('admin',?,'super',1)",
+                      {Str(hash)});
       PLOG_INFO("seeded admin_user admin/admin123");
     }
     lobby_.ReloadFromDb(mysql_);
@@ -90,8 +97,8 @@ AdminLoginResult AdminService::Login(const std::string& username, const std::str
     return r;
   }
   const std::string hash = HashPassword(password);
-  auto rows = mysql_.Query("SELECT id,role,password_hash,enabled FROM admin_user WHERE username='" + Escape(username) +
-                           "' LIMIT 1");
+  auto rows = mysql_.QueryBind("SELECT id,role,password_hash,enabled FROM admin_user WHERE username=? LIMIT 1",
+                               {Str(username)});
   if (!rows || rows->empty() || rows->front().cols.size() < 4) {
     r.error = "invalid credentials";
     return r;
@@ -157,8 +164,8 @@ std::optional<AdminSession> AdminService::Validate(const std::string& token) {
   if (!s) return std::nullopt;
   // optional: confirm admin still enabled in MySQL
   if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT enabled,role,username FROM admin_user WHERE id=" + std::to_string(s->admin_id) +
-                             " LIMIT 1");
+    auto rows = mysql_.QueryBind("SELECT enabled,role,username FROM admin_user WHERE id=? LIMIT 1",
+                                 {I64(s->admin_id)});
     if (!rows || rows->empty() || rows->front().cols[0] != "1") return std::nullopt;
     if (rows->front().cols.size() >= 3) {
       s->role = ParseRole(rows->front().cols[1]);
@@ -193,7 +200,7 @@ bool AdminService::IsBanned(int64_t uid) const {
     if (v && *v == "0") return false;
   }
   if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT status FROM `user` WHERE uid=" + std::to_string(uid) + " LIMIT 1");
+    auto rows = mysql_.QueryBind("SELECT status FROM `user` WHERE uid=? LIMIT 1", {I64(uid)});
     if (rows && !rows->empty() && !rows->front().cols.empty()) return rows->front().cols[0] == "1";
   }
   auto p = store_.GetPlayer(uid);
@@ -224,9 +231,9 @@ void AdminService::Audit(int admin_id, const std::string& action, const std::str
   };
   const std::string bj = to_json_col(before);
   const std::string aj = to_json_col(after);
-  const int r = mysql_.Exec("INSERT INTO admin_audit(admin_id,action,target,before_json,after_json,ip) VALUES(" +
-                            std::to_string(admin_id) + ",'" + Escape(action) + "','" + Escape(target) + "','" +
-                            Escape(bj) + "','" + Escape(aj) + "','')");
+  const int r = mysql_.ExecBind(
+      "INSERT INTO admin_audit(admin_id,action,target,before_json,after_json,ip) VALUES(?,?,?,?,?,'')",
+      {I64(admin_id), Str(action), Str(target), Str(bj), Str(aj)});
   if (r < 0) PLOG_WARN("audit insert fail: " << mysql_.LastError() << " action=" << action);
 }
 
@@ -712,17 +719,19 @@ std::string AdminService::ExportClaimsCsv(int limit) const {
 
 void AdminService::RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json,
                                int base_score, int multiplier) {
-  if (!mysql_.Available()) {
-    PLOG_WARN("RecordRound skipped: mysql unavailable round=" << round_id);
-    return;
-  }
-  mysql_.Exec(
-      "INSERT INTO game_round(round_id,room_id,game_id,template_id,players_json,base_score,multiplier,"
-      "started_at,ended_at) VALUES(" +
-      std::to_string(round_id) + "," + std::to_string(room_id) + ",1," + std::to_string(template_id) + ",'" +
-      Escape(players_json) + "'," + std::to_string(base_score) + "," + std::to_string(multiplier) +
-      ",NOW(3),NOW(3)) ON DUPLICATE KEY UPDATE ended_at=NOW(3),multiplier=VALUES(multiplier),"
-      "players_json=VALUES(players_json)");
+  auto job = [this, round_id, room_id, template_id, players_json, base_score, multiplier]() {
+    if (!mysql_.Available()) {
+      PLOG_WARN("RecordRound skipped: mysql unavailable round=" << round_id);
+      return;
+    }
+    mysql_.ExecBind(
+        "INSERT INTO game_round(round_id,room_id,game_id,template_id,players_json,base_score,multiplier,"
+        "started_at,ended_at) VALUES(?,?,1,?,?,?,?,NOW(3),NOW(3)) "
+        "ON DUPLICATE KEY UPDATE ended_at=NOW(3),multiplier=VALUES(multiplier),"
+        "players_json=VALUES(players_json)",
+        {I64(round_id), I64(room_id), I64(template_id), Str(players_json), I64(base_score), I64(multiplier)});
+  };
+  if (!persist_.Post(job)) job();
 }
 
 }  // namespace pandora

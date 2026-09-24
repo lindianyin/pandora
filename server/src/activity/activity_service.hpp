@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "common/async_worker.hpp"
 #include "net/session_hub.hpp"
 #include "store/mysql_client.hpp"
 #include "store/redis_client.hpp"
@@ -42,7 +43,7 @@ struct ClaimResult {
 
 class ActivityService {
  public:
-  ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub);
+  ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub, AsyncWorker& persist);
 
   void Bootstrap();
   void Reload();
@@ -81,6 +82,7 @@ class ActivityService {
   RedisClient& redis_;
   WalletService& wallet_;
   SessionHub& hub_;
+  AsyncWorker& persist_;
 
   mutable std::mutex mu_;
   std::vector<ActivityDef> defs_;  // hot cache from MySQL only

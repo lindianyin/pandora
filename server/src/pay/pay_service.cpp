@@ -67,11 +67,11 @@ void PayService::UpsertProduct(int id, int amount_fen, int diamond, int gift, bo
 
 std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
   if (!mysql_.Available()) return std::nullopt;
-  auto rows = mysql_.Query(
+  auto rows = mysql_.QueryBind(
       "SELECT order_id,uid,product_id,amount_fen,status,IFNULL(alipay_trade_no,''),"
       "(SELECT diamond+gift_diamond FROM pay_product WHERE id=pay_order.product_id LIMIT 1) "
-      "FROM pay_order WHERE order_id='" +
-      Escape(order_id) + "' LIMIT 1");
+      "FROM pay_order WHERE order_id=? LIMIT 1",
+      {Str(order_id)});
   if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
   const auto& c = rows->front().cols;
   PayOrder o;
@@ -108,11 +108,11 @@ std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
 std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
   std::vector<PayOrder> out;
   if (!mysql_.Available()) return out;
-  auto rows = mysql_.Query(
+  auto rows = mysql_.QueryBind(
       "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,IFNULL(o.alipay_trade_no,''),"
       "IFNULL(p.diamond,0)+IFNULL(p.gift_diamond,0) FROM pay_order o "
-      "LEFT JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT " +
-      std::to_string(limit));
+      "LEFT JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
+      {I64(static_cast<int64_t>(limit))});
   if (!rows) return out;
   for (const auto& row : *rows) {
     if (row.cols.size() < 7) continue;
@@ -158,10 +158,10 @@ std::optional<PayOrder> PayService::CreateOrder(int64_t uid, int product_id) {
   o.diamond = prod.diamond + prod.gift_diamond;
   o.status = 0;
   if (mysql_.Available()) {
-    const int r = mysql_.Exec(
-        "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid) VALUES('" +
-        Escape(o.order_id) + "'," + std::to_string(uid) + "," + std::to_string(prod.id) + "," +
-        std::to_string(prod.amount_fen) + ",0,'',0)");
+    const int r = mysql_.ExecBind(
+        "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid) "
+        "VALUES(?,?,?,?,0,'',0)",
+        {Str(o.order_id), I64(uid), I64(prod.id), I64(prod.amount_fen)});
     if (r < 0) {
       PLOG_WARN("CreateOrder mysql fail: " << mysql_.LastError());
       return std::nullopt;
@@ -190,8 +190,9 @@ bool PayService::PersistPaid(PayOrder& o, const std::string& trade_no) {
   auto r = wallet_.Adjust(o.uid, Currency::kDiamond, o.diamond, "pay_recharge", idem, o.order_id);
   if (!r.ok) return false;
   if (mysql_.Available()) {
-    mysql_.Exec("UPDATE pay_order SET status=1,alipay_trade_no='" + Escape(o.alipay_trade_no) +
-                "',idempotent_paid=1,paid_at=NOW(3) WHERE order_id='" + Escape(o.order_id) + "'");
+    mysql_.ExecBind(
+        "UPDATE pay_order SET status=1,alipay_trade_no=?,idempotent_paid=1,paid_at=NOW(3) WHERE order_id=?",
+        {Str(o.alipay_trade_no), Str(o.order_id)});
   }
   return true;
 }

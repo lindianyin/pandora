@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/async_worker.hpp"
 #include "common/proto_wire.hpp"
 #include "net/session_hub.hpp"
 #include "pay/pay_service.hpp"
@@ -58,7 +59,7 @@ struct AdminLoginResult {
 class AdminService {
  public:
   AdminService(MysqlClient& mysql, RedisClient& redis, MemoryStore& store, WalletService& wallet, PayService& pay,
-               LobbyService& lobby, SessionHub& hub);
+               LobbyService& lobby, SessionHub& hub, AsyncWorker& persist);
 
   void Bootstrap();
 
@@ -114,6 +115,7 @@ class AdminService {
   PayService& pay_;
   LobbyService& lobby_;
   SessionHub& hub_;
+  AsyncWorker& persist_;
 
   mutable std::mutex mu_;
   std::unordered_map<std::string, AdminSession> admin_sessions_;  // hot cache; source of truth Redis

@@ -152,6 +152,9 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
                         {"redis", redis.Ping()},
                         {"store", cfg.store_backend},
                         {"ccu", hub.OnlineCount()},
+                        {"http_workers", cfg.worker.biz_threads},
+                        {"ws_workers", cfg.net.iocp_workers},
+                        {"async_workers", cfg.worker.async_threads},
                         {"iocp_workers", cfg.net.iocp_workers},
                         {"tls", cfg.net.tls_enabled}},
                        trace));

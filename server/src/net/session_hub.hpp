@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -18,6 +19,8 @@ class ISessionConn {
 
 class SessionHub {
  public:
+  static constexpr std::size_t kShards = 64;
+
   void Bind(int64_t uid, std::shared_ptr<ISessionConn> conn);
   void Unbind(int64_t uid, ISessionConn* conn);
   bool Send(int64_t uid, uint32_t msg_id, const std::vector<uint8_t>& body);
@@ -28,9 +31,16 @@ class SessionHub {
   size_t OnlineCount();
 
  private:
-  std::mutex mu_;
-  std::unordered_map<int64_t, std::shared_ptr<ISessionConn>> by_uid_;
+  struct Shard {
+    std::mutex mu;
+    std::unordered_map<int64_t, std::shared_ptr<ISessionConn>> by_uid;
+  };
+
+  static std::size_t ShardOf(int64_t uid) {
+    return static_cast<std::size_t>(uid >= 0 ? uid : -uid) % kShards;
+  }
+
+  std::array<Shard, kShards> shards_{};
 };
 
 }  // namespace pandora
-

@@ -214,38 +214,38 @@ class RoomManager {
 
   };
 
-
+  void ClearTrusteeshipInRoom(Room& r, int64_t uid);
 
   Room* FindRoomUnlocked(int64_t room_id);
 
-
+  static constexpr std::size_t kShards = 64;
 
  private:
+  struct RoomShard {
+    std::recursive_mutex mu;
+    std::unordered_map<int64_t, Room> rooms;
+  };
 
   void MaybeStart(Room& room);
-
-
+  static std::size_t ShardOf(int64_t room_id) {
+    return static_cast<std::size_t>(room_id >= 0 ? room_id : -room_id) % kShards;
+  }
+  RoomShard& Shard(int64_t room_id) { return shards_[ShardOf(room_id)]; }
+  // Lookup room_id under index_mu_; empty if not seated.
+  std::optional<int64_t> RoomIdOfUnlocked(int64_t uid) const;
 
   SessionHub& hub_;
-
   MemoryStore& store_;
-
   WalletService& wallet_;
-
   AdminService* admin_{nullptr};
   ActivityService* activity_{nullptr};
-
   GameConfig cfg_;
 
-  std::recursive_mutex mu_;
-
+  // Lock order when both needed: index_mu_ then shard.mu
+  std::mutex index_mu_;
   int64_t next_room_id_{1};
-
-  std::unordered_map<int64_t, Room> rooms_;
-
   std::unordered_map<int64_t, int64_t> uid_to_room_;
-
-
+  std::array<RoomShard, kShards> shards_{};
 
   friend class DdzClassicSimple;
 

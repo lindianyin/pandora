@@ -13,6 +13,7 @@
 #include "activity/activity_service.hpp"
 #include "admin/admin_service.hpp"
 #include "auth/auth_service.hpp"
+#include "common/async_worker.hpp"
 #include "common/config.hpp"
 #include "common/log.hpp"
 #include "net/game_runtime.hpp"
@@ -49,7 +50,11 @@ int main(int argc, char** argv) {
 
   MysqlClient mysql(cfg.mysql.dsn, cfg.mysql.pool_size);
   RedisClient redis(cfg.redis.uri, cfg.redis.pool_size);
-  MemoryStore store(mysql, redis);
+
+  AsyncWorker persist(cfg.worker.async_threads);
+  persist.Start();
+
+  MemoryStore store(mysql, redis, persist);
   AuthService auth(store);
   WalletService wallet(store, cfg.exchange.diamond_to_gold);
   AlipayConfig acfg;
@@ -60,38 +65,46 @@ int main(int argc, char** argv) {
   PayService pay(wallet, mysql, acfg);
 
   GameRuntime runtime(store, wallet, cfg.game);
-  AdminService admin(mysql, redis, store, wallet, pay, runtime.lobby, runtime.hub);
-  ActivityService activity(mysql, redis, wallet, runtime.hub);
+  AdminService admin(mysql, redis, store, wallet, pay, runtime.lobby, runtime.hub, persist);
+  ActivityService activity(mysql, redis, wallet, runtime.hub, persist);
   runtime.rooms.SetAdmin(&admin);
   runtime.rooms.SetActivity(&activity);
   admin.Bootstrap();
   activity.Bootstrap();
 
-  const int workers = (std::max)(1, cfg.net.iocp_workers);
-  boost::asio::io_context ioc{workers};
+  // Isolate HTTP (slow / admin / pay) from WSS (game hot path).
+  const int ws_workers = (std::max)(1, cfg.net.iocp_workers);
+  const int http_workers = (std::max)(2, cfg.worker.biz_threads);
+  boost::asio::io_context http_ioc{http_workers};
+  boost::asio::io_context ws_ioc{ws_workers};
 
   HttpApi http(cfg, store, auth, wallet, pay, admin, activity, mysql, redis, runtime.hub);
   WsServer ws(cfg, auth, runtime, &admin);
-  http.Start(ioc, conf_dir);
-  ws.Start(ioc, conf_dir);
+  http.Start(http_ioc, conf_dir);
+  ws.Start(ws_ioc, conf_dir);
 
   std::thread tick_thread([&]() {
     while (g_running) {
       runtime.Tick();
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    ioc.stop();
+    http_ioc.stop();
+    ws_ioc.stop();
   });
 
   std::vector<std::thread> pool;
-  pool.reserve(static_cast<size_t>(workers));
-  for (int i = 0; i < workers; ++i) {
-    pool.emplace_back([&ioc]() { ioc.run(); });
+  pool.reserve(static_cast<size_t>(http_workers + ws_workers));
+  for (int i = 0; i < http_workers; ++i) {
+    pool.emplace_back([&http_ioc]() { http_ioc.run(); });
+  }
+  for (int i = 0; i < ws_workers; ++i) {
+    pool.emplace_back([&ws_ioc]() { ws_ioc.run(); });
   }
 
   PLOG_INFO("ready: " << (cfg.net.tls_enabled ? "HTTPS" : "HTTP") << " :" << cfg.net.http_port << " "
                       << (cfg.net.tls_enabled ? "WSS" : "WS") << " :" << cfg.net.ws_port
-                      << " asio_workers=" << workers << " tls=" << cfg.net.tls_enabled
+                      << " http_workers=" << http_workers << " ws_workers=" << ws_workers
+                      << " async_workers=" << cfg.worker.async_threads << " tls=" << cfg.net.tls_enabled
                       << " force_tls=" << cfg.net.force_tls << " mysql=" << mysql.Available()
                       << " mysql_pool=" << mysql.PoolSize() << " redis=" << redis.Available()
                       << " redis_pool=" << redis.PoolSize());
@@ -99,6 +112,7 @@ int main(int argc, char** argv) {
   for (auto& t : pool) t.join();
   g_running = false;
   if (tick_thread.joinable()) tick_thread.join();
+  persist.Stop();
   PLOG_INFO("shutting down");
   return 0;
 }

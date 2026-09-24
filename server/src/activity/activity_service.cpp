@@ -23,8 +23,9 @@ std::string JsonEscape(const std::string& s) {
 
 }  // namespace
 
-ActivityService::ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub)
-    : mysql_(mysql), redis_(redis), wallet_(wallet), hub_(hub) {}
+ActivityService::ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub,
+                                 AsyncWorker& persist)
+    : mysql_(mysql), redis_(redis), wallet_(wallet), hub_(hub), persist_(persist) {}
 
 std::string ActivityService::EscapeSql(const std::string& s) const {
   std::string o;
@@ -99,8 +100,8 @@ void ActivityService::InitGiftStock(const ActivityDef& d) {
   const int stock = ExtractInt(d.rules_json, "stock", 0);
   const std::string rkey = "act:stock:" + std::to_string(d.id);
   if (mysql_.Available()) {
-    mysql_.Exec("INSERT INTO activity_stock(activity_id,remain) VALUES(" + std::to_string(d.id) + "," +
-                std::to_string(stock) + ") ON DUPLICATE KEY UPDATE activity_id=activity_id");
+    mysql_.ExecBind("INSERT INTO activity_stock(activity_id,remain) VALUES(?,?) ON DUPLICATE KEY UPDATE activity_id=activity_id",
+                    {I64(d.id), I64(stock)});
   }
   if (redis_.Available()) {
     auto cur = redis_.Get(rkey);
@@ -191,19 +192,18 @@ bool ActivityService::UpsertDef(const ActivityDef& def, std::string* err) {
     return false;
   }
   if (def.id <= 0) {
-    const int r = mysql_.Exec(
-        "INSERT INTO activity_define(type,title,rules_json,enabled) VALUES('" + EscapeSql(def.type) + "','" +
-        EscapeSql(def.title) + "','" + EscapeSql(def.rules_json) + "'," + (def.enabled ? "1" : "0") + ")");
+    const int r = mysql_.ExecBind("INSERT INTO activity_define(type,title,rules_json,enabled) VALUES(?,?,?,?)",
+                                  {Str(def.type), Str(def.title), Str(def.rules_json), I64(def.enabled ? 1 : 0)});
     if (r < 0) {
       if (err) *err = mysql_.LastError();
       return false;
     }
   } else {
-    const int r = mysql_.Exec("INSERT INTO activity_define(id,type,title,rules_json,enabled) VALUES(" +
-                              std::to_string(def.id) + ",'" + EscapeSql(def.type) + "','" + EscapeSql(def.title) +
-                              "','" + EscapeSql(def.rules_json) + "'," + (def.enabled ? "1" : "0") +
-                              ") ON DUPLICATE KEY UPDATE type=VALUES(type),title=VALUES(title),"
-                              "rules_json=VALUES(rules_json),enabled=VALUES(enabled)");
+    const int r = mysql_.ExecBind(
+        "INSERT INTO activity_define(id,type,title,rules_json,enabled) VALUES(?,?,?,?,?) "
+        "ON DUPLICATE KEY UPDATE type=VALUES(type),title=VALUES(title),"
+        "rules_json=VALUES(rules_json),enabled=VALUES(enabled)",
+        {I64(def.id), Str(def.type), Str(def.title), Str(def.rules_json), I64(def.enabled ? 1 : 0)});
     if (r < 0) {
       if (err) *err = mysql_.LastError();
       return false;
@@ -238,7 +238,7 @@ bool ActivityService::SetEnabled(int id, bool enabled, std::string* err) {
 
 int ActivityService::ClaimCount(int activity_id) const {
   if (!mysql_.Available()) return 0;
-  auto rows = mysql_.Query("SELECT COUNT(*) FROM activity_claim WHERE activity_id=" + std::to_string(activity_id));
+  auto rows = mysql_.QueryBind("SELECT COUNT(*) FROM activity_claim WHERE activity_id=?", {I64(activity_id)});
   if (rows && !rows->empty() && !rows->front().cols.empty()) {
     try {
       return std::stoi(rows->front().cols[0]);
@@ -255,8 +255,9 @@ std::string ActivityService::LoadProgress(int64_t uid, int aid) {
     if (v && !v->empty()) return *v;
   }
   if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT CAST(progress_json AS CHAR) FROM activity_progress WHERE activity_id=" +
-                             std::to_string(aid) + " AND uid=" + std::to_string(uid) + " LIMIT 1");
+    auto rows = mysql_.QueryBind(
+        "SELECT CAST(progress_json AS CHAR) FROM activity_progress WHERE activity_id=? AND uid=? LIMIT 1",
+        {I64(aid), I64(uid)});
     if (rows && !rows->empty() && !rows->front().cols.empty()) {
       const auto& json = rows->front().cols[0];
       if (redis_.Available()) redis_.Set("act:prog:" + mk, json, 86400);
@@ -268,17 +269,22 @@ std::string ActivityService::LoadProgress(int64_t uid, int aid) {
 
 void ActivityService::SaveProgress(int64_t uid, int aid, const std::string& json) {
   const std::string mk = std::to_string(aid) + ":" + std::to_string(uid);
-  if (mysql_.Available()) {
-    const int r = mysql_.Exec("INSERT INTO activity_progress(activity_id,uid,progress_json) VALUES(" +
-                              std::to_string(aid) + "," + std::to_string(uid) + ",'" + EscapeSql(json) +
-                              "') ON DUPLICATE KEY UPDATE progress_json=VALUES(progress_json)");
-    if (r < 0) PLOG_WARN("SaveProgress mysql fail: " << mysql_.LastError());
-  } else {
-    PLOG_WARN("SaveProgress skipped: mysql unavailable");
-  }
+  // Hot path: refresh Redis immediately; MySQL offloaded.
   if (redis_.Available()) {
     if (!redis_.Set("act:prog:" + mk, json, 86400)) PLOG_WARN("SaveProgress redis fail: " << redis_.LastError());
   }
+  auto job = [this, uid, aid, json]() {
+    if (!mysql_.Available()) {
+      PLOG_WARN("SaveProgress skipped: mysql unavailable");
+      return;
+    }
+    const int r = mysql_.ExecBind(
+        "INSERT INTO activity_progress(activity_id,uid,progress_json) VALUES(?,?,?) "
+        "ON DUPLICATE KEY UPDATE progress_json=VALUES(progress_json)",
+        {I64(aid), I64(uid), Str(json)});
+    if (r < 0) PLOG_WARN("SaveProgress mysql fail: " << mysql_.LastError());
+  };
+  if (!persist_.Post(job)) job();
 }
 
 bool ActivityService::HasClaimed(int64_t uid, int aid, const std::string& reward_key) {
@@ -288,9 +294,9 @@ bool ActivityService::HasClaimed(int64_t uid, int aid, const std::string& reward
     if (v && !v->empty()) return true;
   }
   if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT id FROM activity_claim WHERE activity_id=" + std::to_string(aid) +
-                             " AND uid=" + std::to_string(uid) + " AND reward_key='" + EscapeSql(reward_key) +
-                             "' LIMIT 1");
+    auto rows = mysql_.QueryBind(
+        "SELECT id FROM activity_claim WHERE activity_id=? AND uid=? AND reward_key=? LIMIT 1",
+        {I64(aid), I64(uid), Str(reward_key)});
     if (rows && !rows->empty()) {
       if (redis_.Available()) redis_.Set(ck, "1");
       return true;
@@ -302,8 +308,8 @@ bool ActivityService::HasClaimed(int64_t uid, int aid, const std::string& reward
 void ActivityService::MarkClaimed(int64_t uid, int aid, const std::string& reward_key) {
   const std::string ck = "act:claim:" + std::to_string(aid) + ":" + std::to_string(uid) + ":" + reward_key;
   if (mysql_.Available()) {
-    const int r = mysql_.Exec("INSERT IGNORE INTO activity_claim(activity_id,uid,reward_key) VALUES(" +
-                              std::to_string(aid) + "," + std::to_string(uid) + ",'" + EscapeSql(reward_key) + "')");
+    const int r = mysql_.ExecBind("INSERT IGNORE INTO activity_claim(activity_id,uid,reward_key) VALUES(?,?,?)",
+                                  {I64(aid), I64(uid), Str(reward_key)});
     if (r < 0) PLOG_WARN("MarkClaimed mysql fail: " << mysql_.LastError());
   } else {
     PLOG_WARN("MarkClaimed skipped: mysql unavailable");
@@ -323,7 +329,7 @@ int ActivityService::ReadStock(int aid) const {
     }
   }
   if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT remain FROM activity_stock WHERE activity_id=" + std::to_string(aid) + " LIMIT 1");
+    auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
     if (rows && !rows->empty() && !rows->front().cols.empty()) {
       try {
         const int n = std::stoi(rows->front().cols[0]);
@@ -341,13 +347,13 @@ bool ActivityService::DecrStock(int aid, int& remain) {
 
   // MySQL CAS first (source of truth), then sync Redis
   if (mysql_.Available()) {
-    const int r = mysql_.Exec("UPDATE activity_stock SET remain=remain-1 WHERE activity_id=" + std::to_string(aid) +
-                              " AND remain>0");
+    const int r = mysql_.ExecBind("UPDATE activity_stock SET remain=remain-1 WHERE activity_id=? AND remain>0",
+                                  {I64(aid)});
     if (r <= 0) {
       remain = ReadStock(aid);
       return false;
     }
-    auto rows = mysql_.Query("SELECT remain FROM activity_stock WHERE activity_id=" + std::to_string(aid) + " LIMIT 1");
+    auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
     remain = 0;
     if (rows && !rows->empty() && !rows->front().cols.empty()) {
       try {

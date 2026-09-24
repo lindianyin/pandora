@@ -55,6 +55,11 @@ struct RedisConfig {
   int pool_size{10};
 };
 
+struct WorkerConfig {
+  int biz_threads{4};     // HTTP/HTTPS io threads
+  int async_threads{2};   // persist / ledger workers
+};
+
 struct AppConfig {
   NetConfig net;
   GameConfig game;
@@ -62,6 +67,7 @@ struct AppConfig {
   AlipayAppConfig alipay;
   MysqlConfig mysql;
   RedisConfig redis;
+  WorkerConfig worker;
   std::string store_backend{"memory"};  // memory | mysql (mysql driver optional; falls back)
 };
 

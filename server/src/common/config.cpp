@@ -69,6 +69,10 @@ AppConfig LoadConfig(const std::string& path) {
   cfg.redis.uri = redis.value("uri", cfg.redis.uri);
   cfg.redis.pool_size = redis.value("pool_size", cfg.redis.pool_size);
 
+  const auto worker = root.value("worker", nlohmann::json::object());
+  cfg.worker.biz_threads = worker.value("biz_threads", cfg.worker.biz_threads);
+  cfg.worker.async_threads = worker.value("async_threads", cfg.worker.async_threads);
+
   if (cfg.store_backend == "mysql") {
     PLOG_WARN("store.backend=mysql selected; ledger uses MemoryStore over MySQL/Redis drivers");
     cfg.store_backend = "memory";

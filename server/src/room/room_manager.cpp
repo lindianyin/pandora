@@ -25,37 +25,54 @@ int64_t NowMs() {
 RoomManager::RoomManager(SessionHub& hub, MemoryStore& store, WalletService& wallet, GameConfig cfg)
     : hub_(hub), store_(store), wallet_(wallet), cfg_(std::move(cfg)) {}
 
+std::optional<int64_t> RoomManager::RoomIdOfUnlocked(int64_t uid) const {
+  auto it = uid_to_room_.find(uid);
+  if (it == uid_to_room_.end()) return std::nullopt;
+  return it->second;
+}
+
 int64_t RoomManager::CreateRoom(int32_t template_id, const std::array<int64_t, 3>& uids) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  const int64_t rid = next_room_id_++;
-  Room room;
-  room.room_id = rid;
-  room.template_id = template_id;
-  room.phase = "WaitReady";
+  // Prefetch nicknames / online without holding room locks.
+  std::array<std::string, 3> nicks{};
+  std::array<bool, 3> online{};
   for (int i = 0; i < 3; ++i) {
-    room.seats[i].uid = uids[i];
     auto p = store_.GetPlayer(uids[i]);
-    room.seats[i].nickname = p ? p->nickname : ("P" + std::to_string(uids[i]));
-    room.seats[i].ready = false;
-    room.seats[i].online = hub_.IsOnline(uids[i]);
-    uid_to_room_[uids[i]] = rid;
+    nicks[i] = p ? p->nickname : ("P" + std::to_string(uids[i]));
+    online[i] = hub_.IsOnline(uids[i]);
   }
-  rooms_[rid] = std::move(room);
+
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    rid = next_room_id_++;
+    for (int64_t uid : uids) uid_to_room_[uid] = rid;
+    std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+    Room room;
+    room.room_id = rid;
+    room.template_id = template_id;
+    room.phase = "WaitReady";
+    for (int i = 0; i < 3; ++i) {
+      room.seats[i].uid = uids[i];
+      room.seats[i].nickname = nicks[i];
+      room.seats[i].ready = false;
+      room.seats[i].online = online[i];
+    }
+    Shard(rid).rooms[rid] = std::move(room);
+  }
   PLOG_INFO("room created id=" << rid);
   return rid;
 }
 
 RoomManager::Room* RoomManager::FindRoomUnlocked(int64_t room_id) {
-  auto it = rooms_.find(room_id);
-  if (it == rooms_.end()) return nullptr;
+  auto& sh = Shard(room_id);
+  auto it = sh.rooms.find(room_id);
+  if (it == sh.rooms.end()) return nullptr;
   return &it->second;
 }
 
 std::optional<int64_t> RoomManager::RoomOf(int64_t uid) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return std::nullopt;
-  return it->second;
+  std::lock_guard<std::mutex> lk(index_mu_);
+  return RoomIdOfUnlocked(uid);
 }
 
 void RoomManager::SendToUid(int64_t uid, uint32_t msg_id, const std::vector<uint8_t>& body) {
@@ -63,7 +80,7 @@ void RoomManager::SendToUid(int64_t uid, uint32_t msg_id, const std::vector<uint
 }
 
 void RoomManager::PushRoomState(int64_t room_id) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
+  std::lock_guard<std::recursive_mutex> lk(Shard(room_id).mu);
   Room* r = FindRoomUnlocked(room_id);
   if (!r) return;
   std::vector<proto_wire::RoomSeat> seats;
@@ -97,14 +114,19 @@ void RoomManager::MaybeStart(Room& room) {
 }
 
 bool RoomManager::SetReady(int64_t uid, bool ready) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) {
-    hub_.Send(uid, MsgId::kS2C_Error,
-              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "not in room", MsgId::kC2S_Ready));
-    return false;
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) {
+      hub_.Send(uid, MsgId::kS2C_Error,
+                proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "not in room", MsgId::kC2S_Ready));
+      return false;
+    }
+    rid = *rid_opt;
   }
-  Room* r = FindRoomUnlocked(it->second);
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+  Room* r = FindRoomUnlocked(rid);
   if (!r) return false;
   if (r->game && !r->game->Finished()) {
     hub_.Send(uid, MsgId::kS2C_Error,
@@ -123,10 +145,15 @@ bool RoomManager::SetReady(int64_t uid, bool ready) {
 }
 
 bool RoomManager::Leave(int64_t uid) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return false;
-  const int64_t rid = it->second;
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) return false;
+    rid = *rid_opt;
+  }
+  std::lock_guard<std::mutex> ilk(index_mu_);
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
   Room* r = FindRoomUnlocked(rid);
   if (!r) return false;
   if (r->game && !r->game->Finished()) {
@@ -148,7 +175,7 @@ bool RoomManager::Leave(int64_t uid) {
   for (const auto& s : r->seats)
     if (s.uid) empty = false;
   if (empty) {
-    rooms_.erase(rid);
+    Shard(rid).rooms.erase(rid);
   } else {
     PushRoomState(rid);
   }
@@ -156,10 +183,15 @@ bool RoomManager::Leave(int64_t uid) {
 }
 
 void RoomManager::OnDisconnect(int64_t uid) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return;
-  Room* r = FindRoomUnlocked(it->second);
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) return;
+    rid = *rid_opt;
+  }
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+  Room* r = FindRoomUnlocked(rid);
   if (!r) return;
   for (auto& s : r->seats) {
     if (s.uid == uid) {
@@ -171,10 +203,15 @@ void RoomManager::OnDisconnect(int64_t uid) {
 }
 
 void RoomManager::OnReconnect(int64_t uid) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return;
-  Room* r = FindRoomUnlocked(it->second);
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) return;
+    rid = *rid_opt;
+  }
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+  Room* r = FindRoomUnlocked(rid);
   if (!r) return;
   for (auto& s : r->seats) {
     if (s.uid == uid) {
@@ -187,34 +224,49 @@ void RoomManager::OnReconnect(int64_t uid) {
 }
 
 void RoomManager::ClearTrusteeshipUid(int64_t uid) {
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return;
-  Room* r = FindRoomUnlocked(it->second);
+  // Prefer ClearTrusteeshipInRoom when room is already known.
+  auto rid_opt = RoomIdOfUnlocked(uid);
+  if (!rid_opt) return;
+  Room* r = FindRoomUnlocked(*rid_opt);
   if (!r) return;
   for (auto& s : r->seats) {
     if (s.uid == uid) s.trusteeship = false;
   }
 }
 
+void RoomManager::ClearTrusteeshipInRoom(Room& r, int64_t uid) {
+  for (auto& s : r.seats) {
+    if (s.uid == uid) s.trusteeship = false;
+  }
+}
+
 bool RoomManager::IsTrusteeship(int64_t room_id, int seat) {
+  // Caller typically holds shard lock (recursive).
+  std::lock_guard<std::recursive_mutex> lk(Shard(room_id).mu);
   Room* r = FindRoomUnlocked(room_id);
   if (!r || seat < 0 || seat > 2) return false;
   return r->seats[seat].trusteeship;
 }
 
 void RoomManager::SetTrusteeship(int64_t room_id, int seat, bool on) {
+  std::lock_guard<std::recursive_mutex> lk(Shard(room_id).mu);
   Room* r = FindRoomUnlocked(room_id);
   if (!r || seat < 0 || seat > 2) return;
   r->seats[seat].trusteeship = on;
 }
 
 void RoomManager::OnBid(int64_t uid, int score) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return;
-  Room* r = FindRoomUnlocked(it->second);
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) return;
+    rid = *rid_opt;
+  }
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+  Room* r = FindRoomUnlocked(rid);
   if (!r || !r->game) return;
-  ClearTrusteeshipUid(uid);
+  ClearTrusteeshipInRoom(*r, uid);
   int seat = -1;
   for (int i = 0; i < 3; ++i)
     if (r->seats[i].uid == uid) seat = i;
@@ -224,12 +276,17 @@ void RoomManager::OnBid(int64_t uid, int score) {
 }
 
 void RoomManager::OnPlay(int64_t uid, bool pass, const std::vector<int>& cards) {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
-  auto it = uid_to_room_.find(uid);
-  if (it == uid_to_room_.end()) return;
-  Room* r = FindRoomUnlocked(it->second);
+  int64_t rid = 0;
+  {
+    std::lock_guard<std::mutex> ilk(index_mu_);
+    auto rid_opt = RoomIdOfUnlocked(uid);
+    if (!rid_opt) return;
+    rid = *rid_opt;
+  }
+  std::lock_guard<std::recursive_mutex> slk(Shard(rid).mu);
+  Room* r = FindRoomUnlocked(rid);
   if (!r || !r->game) return;
-  ClearTrusteeshipUid(uid);
+  ClearTrusteeshipInRoom(*r, uid);
   int seat = -1;
   for (int i = 0; i < 3; ++i)
     if (r->seats[i].uid == uid) seat = i;
@@ -244,18 +301,12 @@ void RoomManager::OnPlay(int64_t uid, bool pass, const std::vector<int>& cards) 
 }
 
 void RoomManager::Tick() {
-  std::lock_guard<std::recursive_mutex> lk(mu_);
   const auto now = std::chrono::steady_clock::now();
-  for (auto& kv : rooms_) {
-    Room& r = kv.second;
-    if (r.game) {
-      // Trusteeship auto-act on current seat
-      if (!r.game->Finished()) {
-        const int cs = r.game->CurrentSeat();
-        if (cs >= 0 && cs < 3 && r.seats[cs].trusteeship) {
-          // force deadline pass so Tick inside game auto-acts, or call directly
-        }
-      }
+  for (auto& sh : shards_) {
+    std::lock_guard<std::recursive_mutex> lk(sh.mu);
+    for (auto& kv : sh.rooms) {
+      Room& r = kv.second;
+      if (!r.game) continue;
       r.game->Tick(now);
       r.phase = r.game->Phase();
       if (r.game->Finished()) {

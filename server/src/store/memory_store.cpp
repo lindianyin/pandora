@@ -19,7 +19,8 @@ std::string MakeToken() {
 
 }  // namespace
 
-MemoryStore::MemoryStore(MysqlClient& mysql, RedisClient& redis) : mysql_(mysql), redis_(redis) {}
+MemoryStore::MemoryStore(MysqlClient& mysql, RedisClient& redis, AsyncWorker& persist)
+    : mysql_(mysql), redis_(redis), persist_(persist) {}
 
 std::string MemoryStore::EscapeSql(const std::string& s) const {
   std::string o;
@@ -37,21 +38,48 @@ void MemoryStore::WriteRedisProfile(const PlayerRecord& p) {
       << EscapeSql(p.nickname) << "\",\"gold\":" << p.gold << ",\"diamond\":" << p.diamond
       << ",\"status\":" << p.status << "}";
   redis_.Set("player:" + std::to_string(p.uid), oss.str(), 3600);
-  redis_.Set("user:open:1:" + p.open_id, std::to_string(p.uid), 3600);
+  if (!p.open_id.empty()) redis_.Set("user:open:1:" + p.open_id, std::to_string(p.uid), 3600);
 }
 
 void MemoryStore::CachePlayer(const PlayerRecord& p) {
-  players_[p.uid] = p;
-  if (!p.open_id.empty()) open_id_index_[p.open_id] = p.uid;
-  WriteRedisProfile(p);
+  {
+    auto& sh = player_shards_[UidShard(p.uid)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    sh.players[p.uid] = p;
+  }
+  if (!p.open_id.empty()) {
+    std::lock_guard<std::mutex> lk(open_mu_);
+    open_id_index_[p.open_id] = p.uid;
+  }
+}
+
+void MemoryStore::EnqueuePersistAdjust(const PlayerRecord& snap, const LedgerEntry& e) {
+  persist_.Post([this, snap, e]() { PersistAdjust(snap, e); });
+}
+
+void MemoryStore::PersistAdjust(PlayerRecord snap, LedgerEntry e) {
+  WriteRedisProfile(snap);
+  if (!mysql_.Available()) return;
+  if (e.currency == static_cast<int>(Currency::kDiamond)) {
+    mysql_.ExecBind("UPDATE player_profile SET diamond=? WHERE uid=?", {I64(e.balance_after), I64(e.uid)});
+  } else {
+    mysql_.ExecBind("UPDATE player_profile SET gold=? WHERE uid=?", {I64(e.balance_after), I64(e.uid)});
+  }
+  if (!e.idempotent_key.empty()) {
+    mysql_.ExecBind(
+        "INSERT IGNORE INTO ledger(uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id) "
+        "VALUES(?,?,?,?,?,?,?)",
+        {I64(e.uid), I64(e.currency), I64(e.delta), I64(e.balance_after), Str(e.biz_type), Str(e.idempotent_key),
+         Str(e.ref_id)});
+  }
 }
 
 std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByOpenId(const std::string& open_id) {
   if (!mysql_.Available() || open_id.empty()) return std::nullopt;
-  auto rows = mysql_.Query(
+  auto rows = mysql_.QueryBind(
       "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,10000),IFNULL(p.diamond,0) "
-      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.account_type=1 AND u.open_id='" +
-      EscapeSql(open_id) + "' LIMIT 1");
+      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.account_type=1 AND u.open_id=? LIMIT 1",
+      {Str(open_id)});
   if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
   const auto& c = rows->front().cols;
   PlayerRecord p;
@@ -70,10 +98,10 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByOpenId(const std::string
 
 std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
   if (!mysql_.Available() || uid <= 0) return std::nullopt;
-  auto rows = mysql_.Query(
+  auto rows = mysql_.QueryBind(
       "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,10000),IFNULL(p.diamond,0) "
-      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.uid=" +
-      std::to_string(uid) + " LIMIT 1");
+      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.uid=? LIMIT 1",
+      {I64(uid)});
   if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
   const auto& c = rows->front().cols;
   PlayerRecord p;
@@ -92,10 +120,9 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
 
 bool MemoryStore::InsertMysqlUser(PlayerRecord& p) {
   if (!mysql_.Available()) return false;
-  const int r = mysql_.Exec("INSERT INTO `user`(account_type,open_id,status) VALUES(1,'" + EscapeSql(p.open_id) +
-                            "'," + std::to_string(p.status) + ")");
+  const int r = mysql_.ExecBind("INSERT INTO `user`(account_type,open_id,status) VALUES(1,?,?)",
+                                {Str(p.open_id), I64(p.status)});
   if (r < 0) {
-    // duplicate open_id — load existing
     auto exist = LoadFromMysqlByOpenId(p.open_id);
     if (!exist) {
       PLOG_WARN("InsertMysqlUser fail: " << mysql_.LastError());
@@ -111,9 +138,10 @@ bool MemoryStore::InsertMysqlUser(PlayerRecord& p) {
   }
   p.uid = loaded->uid;
   if (p.nickname.empty()) p.nickname = "Player" + std::to_string(p.uid);
-  mysql_.Exec("INSERT INTO player_profile(uid,nickname,avatar,gold,diamond,level) VALUES(" + std::to_string(p.uid) +
-              ",'" + EscapeSql(p.nickname) + "',''," + std::to_string(p.gold) + "," + std::to_string(p.diamond) +
-              ",1) ON DUPLICATE KEY UPDATE nickname=VALUES(nickname)");
+  mysql_.ExecBind(
+      "INSERT INTO player_profile(uid,nickname,avatar,gold,diamond,level) VALUES(?,?,'',?,?,1) "
+      "ON DUPLICATE KEY UPDATE nickname=VALUES(nickname)",
+      {I64(p.uid), Str(p.nickname), I64(p.gold), I64(p.diamond)});
   return true;
 }
 
@@ -121,17 +149,20 @@ PlayerRecord MemoryStore::CreateGuest(const std::string& device_id) {
   const std::string open_id = device_id.empty() ? ("guest-tmp-" + MakeToken()) : device_id;
 
   {
-    std::lock_guard<std::mutex> lk(mu_);
+    std::lock_guard<std::mutex> lk(open_mu_);
     auto it = open_id_index_.find(open_id);
     if (it != open_id_index_.end()) {
-      auto pit = players_.find(it->second);
-      if (pit != players_.end()) return pit->second;
+      const int64_t uid = it->second;
+      auto& sh = player_shards_[UidShard(uid)];
+      std::lock_guard<std::mutex> plk(sh.mu);
+      auto pit = sh.players.find(uid);
+      if (pit != sh.players.end()) return pit->second;
     }
   }
 
   if (auto exist = LoadFromMysqlByOpenId(open_id)) {
-    std::lock_guard<std::mutex> lk(mu_);
     CachePlayer(*exist);
+    WriteRedisProfile(*exist);
     return *exist;
   }
 
@@ -145,20 +176,19 @@ PlayerRecord MemoryStore::CreateGuest(const std::string& device_id) {
   if (InsertMysqlUser(p)) {
     if (p.nickname.empty() || p.nickname.rfind("Player", 0) == 0)
       p.nickname = "Player" + std::to_string(p.uid);
-    // ensure nickname persisted
     if (mysql_.Available()) {
-      mysql_.Exec("UPDATE player_profile SET nickname='" + EscapeSql(p.nickname) + "' WHERE uid=" +
-                  std::to_string(p.uid));
+      mysql_.ExecBind("UPDATE player_profile SET nickname=? WHERE uid=?", {Str(p.nickname), I64(p.uid)});
     }
-    std::lock_guard<std::mutex> lk(mu_);
     CachePlayer(p);
+    WriteRedisProfile(p);
     PLOG_INFO("user persisted uid=" << p.uid << " open_id=" << p.open_id);
     return p;
   }
 
-  // MySQL unavailable: local-only fallback
-  std::lock_guard<std::mutex> lk(mu_);
-  p.uid = next_uid_++;
+  {
+    std::lock_guard<std::mutex> lk(meta_mu_);
+    p.uid = next_uid_++;
+  }
   if (p.open_id.rfind("guest-tmp-", 0) == 0) p.open_id = "guest-" + std::to_string(p.uid);
   p.nickname = "Player" + std::to_string(p.uid);
   CachePlayer(p);
@@ -168,12 +198,12 @@ PlayerRecord MemoryStore::CreateGuest(const std::string& device_id) {
 
 std::optional<PlayerRecord> MemoryStore::GetPlayer(int64_t uid) {
   {
-    std::lock_guard<std::mutex> lk(mu_);
-    auto it = players_.find(uid);
-    if (it != players_.end()) return it->second;
+    auto& sh = player_shards_[UidShard(uid)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    auto it = sh.players.find(uid);
+    if (it != sh.players.end()) return it->second;
   }
   if (auto p = LoadFromMysqlByUid(uid)) {
-    std::lock_guard<std::mutex> lk(mu_);
     CachePlayer(*p);
     return p;
   }
@@ -181,20 +211,24 @@ std::optional<PlayerRecord> MemoryStore::GetPlayer(int64_t uid) {
 }
 
 SessionRecord MemoryStore::CreateSession(int64_t uid) {
-  std::lock_guard<std::mutex> lk(mu_);
   SessionRecord s;
   s.token = MakeToken();
   s.uid = uid;
-  sessions_[s.token] = s;
+  {
+    auto& sh = session_shards_[TokenShard(s.token)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    sh.sessions[s.token] = s;
+  }
   if (redis_.Available()) redis_.Set("sess:" + s.token, std::to_string(uid), 86400);
   return s;
 }
 
 std::optional<SessionRecord> MemoryStore::GetSession(const std::string& token) {
   {
-    std::lock_guard<std::mutex> lk(mu_);
-    auto it = sessions_.find(token);
-    if (it != sessions_.end()) return it->second;
+    auto& sh = session_shards_[TokenShard(token)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    auto it = sh.sessions.find(token);
+    if (it != sh.sessions.end()) return it->second;
   }
   if (redis_.Available()) {
     auto v = redis_.Get("sess:" + token);
@@ -203,8 +237,9 @@ std::optional<SessionRecord> MemoryStore::GetSession(const std::string& token) {
         SessionRecord s;
         s.token = token;
         s.uid = std::stoll(*v);
-        std::lock_guard<std::mutex> lk(mu_);
-        sessions_[token] = s;
+        auto& sh = session_shards_[TokenShard(token)];
+        std::lock_guard<std::mutex> lk(sh.mu);
+        sh.sessions[token] = s;
         return s;
       } catch (...) {
       }
@@ -214,14 +249,21 @@ std::optional<SessionRecord> MemoryStore::GetSession(const std::string& token) {
 }
 
 void MemoryStore::RevokeSession(const std::string& token) {
-  std::lock_guard<std::mutex> lk(mu_);
-  sessions_.erase(token);
+  {
+    auto& sh = session_shards_[TokenShard(token)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    sh.sessions.erase(token);
+  }
   if (redis_.Available()) redis_.Del("sess:" + token);
 }
 
 size_t MemoryStore::SessionCount() {
-  std::lock_guard<std::mutex> lk(mu_);
-  return sessions_.size();
+  size_t n = 0;
+  for (auto& sh : session_shards_) {
+    std::lock_guard<std::mutex> lk(sh.mu);
+    n += sh.sessions.size();
+  }
+  return n;
 }
 
 size_t MemoryStore::PlayerCount() {
@@ -234,30 +276,43 @@ size_t MemoryStore::PlayerCount() {
       }
     }
   }
-  std::lock_guard<std::mutex> lk(mu_);
-  return players_.size();
+  size_t n = 0;
+  for (auto& sh : player_shards_) {
+    std::lock_guard<std::mutex> lk(sh.mu);
+    n += sh.players.size();
+  }
+  return n;
 }
 
 void MemoryStore::SetStatus(int64_t uid, int status) {
+  PlayerRecord snap;
+  bool have = false;
   {
-    std::lock_guard<std::mutex> lk(mu_);
-    auto it = players_.find(uid);
-    if (it != players_.end()) {
+    auto& sh = player_shards_[UidShard(uid)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    auto it = sh.players.find(uid);
+    if (it != sh.players.end()) {
       it->second.status = status;
-      WriteRedisProfile(it->second);
+      snap = it->second;
+      have = true;
     }
   }
+  if (have) {
+    persist_.Post([this, snap]() { WriteRedisProfile(snap); });
+  }
   if (mysql_.Available()) {
-    mysql_.Exec("UPDATE `user` SET status=" + std::to_string(status) + " WHERE uid=" + std::to_string(uid));
+    persist_.Post([this, uid, status]() {
+      mysql_.ExecBind("UPDATE `user` SET status=? WHERE uid=?", {I64(status), I64(uid)});
+    });
   }
 }
 
 std::vector<PlayerRecord> MemoryStore::ListPlayers(size_t limit) {
   if (mysql_.Available()) {
-    auto rows = mysql_.Query(
+    auto rows = mysql_.QueryBind(
         "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,0),IFNULL(p.diamond,0) "
-        "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid ORDER BY u.uid DESC LIMIT " +
-        std::to_string(limit));
+        "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid ORDER BY u.uid DESC LIMIT ?",
+        {I64(static_cast<int64_t>(limit))});
     std::vector<PlayerRecord> out;
     if (rows) {
       for (const auto& row : *rows) {
@@ -278,89 +333,76 @@ std::vector<PlayerRecord> MemoryStore::ListPlayers(size_t limit) {
     }
     if (!out.empty()) return out;
   }
-  std::lock_guard<std::mutex> lk(mu_);
   std::vector<PlayerRecord> out;
-  for (const auto& kv : players_) {
-    out.push_back(kv.second);
-    if (out.size() >= limit) break;
+  for (auto& sh : player_shards_) {
+    std::lock_guard<std::mutex> lk(sh.mu);
+    for (const auto& kv : sh.players) {
+      out.push_back(kv.second);
+      if (out.size() >= limit) return out;
+    }
   }
   return out;
 }
 
 std::optional<int64_t> MemoryStore::Adjust(int64_t uid, Currency currency, int64_t delta, const std::string& biz_type,
                                            const std::string& idem_key, const std::string& ref_id) {
-  if (!idem_key.empty() && mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT balance_after FROM ledger WHERE idempotent_key='" + EscapeSql(idem_key) +
-                             "' LIMIT 1");
-    if (rows && !rows->empty() && !rows->front().cols.empty()) {
-      try {
-        const int64_t bal = std::stoll(rows->front().cols[0]);
-        std::lock_guard<std::mutex> lk(mu_);
-        idem_balance_[idem_key] = bal;
-        auto it = players_.find(uid);
-        if (it != players_.end()) {
-          if (currency == Currency::kDiamond)
-            it->second.diamond = bal;
-          else
-            it->second.gold = bal;
-          WriteRedisProfile(it->second);
-        }
-        return bal;
-      } catch (...) {
-      }
-    }
-  }
-
-  // ensure player loaded
+  // Ensure cached; cold miss may hit MySQL (login / first touch), not mid-hand after warm.
   if (!GetPlayer(uid)) return std::nullopt;
 
-  std::lock_guard<std::mutex> lk(mu_);
-  if (!idem_key.empty()) {
-    auto it = idem_balance_.find(idem_key);
-    if (it != idem_balance_.end()) return it->second;
-  }
-  auto pit = players_.find(uid);
-  if (pit == players_.end()) return std::nullopt;
-  int64_t* bal = (currency == Currency::kDiamond) ? &pit->second.diamond : &pit->second.gold;
-  const int64_t next = *bal + delta;
-  if (next < 0) return std::nullopt;
-  *bal = next;
-  if (!idem_key.empty()) idem_balance_[idem_key] = next;
-
+  PlayerRecord snap;
   LedgerEntry e;
-  e.id = next_ledger_id_++;
-  e.uid = uid;
-  e.currency = static_cast<int>(currency);
-  e.delta = delta;
-  e.balance_after = next;
-  e.biz_type = biz_type;
-  e.idempotent_key = idem_key;
-  e.ref_id = ref_id;
-  ledgers_.push_back(e);
-
-  WriteRedisProfile(pit->second);
-
-  if (mysql_.Available()) {
-    const char* col = (currency == Currency::kDiamond) ? "diamond" : "gold";
-    mysql_.Exec(std::string("UPDATE player_profile SET ") + col + "=" + std::to_string(next) +
-                " WHERE uid=" + std::to_string(uid));
+  {
+    auto& sh = player_shards_[UidShard(uid)];
+    std::lock_guard<std::mutex> lk(sh.mu);
     if (!idem_key.empty()) {
-      mysql_.Exec("INSERT INTO ledger(uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id) VALUES(" +
-                  std::to_string(uid) + "," + std::to_string(static_cast<int>(currency)) + "," +
-                  std::to_string(delta) + "," + std::to_string(next) + ",'" + EscapeSql(biz_type) + "','" +
-                  EscapeSql(idem_key) + "','" + EscapeSql(ref_id) + "')");
+      auto it = sh.idem_balance.find(idem_key);
+      if (it != sh.idem_balance.end()) return it->second;
+    }
+    auto pit = sh.players.find(uid);
+    if (pit == sh.players.end()) return std::nullopt;
+    int64_t* bal = (currency == Currency::kDiamond) ? &pit->second.diamond : &pit->second.gold;
+    const int64_t next = *bal + delta;
+    if (next < 0) return std::nullopt;
+    *bal = next;
+    if (!idem_key.empty()) sh.idem_balance[idem_key] = next;
+
+    e.uid = uid;
+    e.currency = static_cast<int>(currency);
+    e.delta = delta;
+    e.balance_after = next;
+    e.biz_type = biz_type;
+    e.idempotent_key = idem_key;
+    e.ref_id = ref_id;
+    snap = pit->second;
+  }
+
+  {
+    std::lock_guard<std::mutex> lk(meta_mu_);
+    e.id = next_ledger_id_++;
+    ledgers_.push_back(e);
+    if (ledgers_.size() > 5000) {
+      ledgers_.erase(ledgers_.begin(), ledgers_.begin() + static_cast<std::ptrdiff_t>(ledgers_.size() - 4000));
     }
   }
-  return next;
+
+  EnqueuePersistAdjust(snap, e);
+  return e.balance_after;
 }
 
 std::vector<LedgerEntry> MemoryStore::RecentLedgers(int64_t uid, size_t limit) {
   if (mysql_.Available()) {
-    std::string sql =
-        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger";
-    if (uid > 0) sql += " WHERE uid=" + std::to_string(uid);
-    sql += " ORDER BY id DESC LIMIT " + std::to_string(limit);
-    auto rows = mysql_.Query(sql);
+    std::optional<std::vector<MysqlRow>> rows;
+    if (uid > 0) {
+      rows = mysql_.QueryBind(
+          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger "
+          "WHERE uid=? ORDER BY id DESC LIMIT ?",
+          {I64(uid), I64(static_cast<int64_t>(limit))});
+    } else {
+      rows = mysql_.QueryBind(
+          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger "
+          "ORDER BY id DESC LIMIT ?",
+          {I64(static_cast<int64_t>(limit))});
+    }
     std::vector<LedgerEntry> out;
     if (rows) {
       for (const auto& row : *rows) {
@@ -383,7 +425,7 @@ std::vector<LedgerEntry> MemoryStore::RecentLedgers(int64_t uid, size_t limit) {
     }
     if (!out.empty()) return out;
   }
-  std::lock_guard<std::mutex> lk(mu_);
+  std::lock_guard<std::mutex> lk(meta_mu_);
   std::vector<LedgerEntry> out;
   for (auto it = ledgers_.rbegin(); it != ledgers_.rend() && out.size() < limit; ++it) {
     if (uid == 0 || it->uid == uid) out.push_back(*it);

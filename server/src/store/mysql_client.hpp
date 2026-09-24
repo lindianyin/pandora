@@ -3,6 +3,8 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -15,6 +17,32 @@ namespace pandora {
 struct MysqlRow {
   std::vector<std::string> cols;
 };
+
+// Bound SQL argument for prepared statements.
+struct SqlArg {
+  enum class Type { Null, Int64, String };
+  Type type{Type::Null};
+  int64_t i64{0};
+  std::string str;
+
+  static SqlArg Null() { return {}; }
+  static SqlArg I64(int64_t v) {
+    SqlArg a;
+    a.type = Type::Int64;
+    a.i64 = v;
+    return a;
+  }
+  static SqlArg Str(std::string v) {
+    SqlArg a;
+    a.type = Type::String;
+    a.str = std::move(v);
+    return a;
+  }
+};
+
+inline SqlArg I64(int64_t v) { return SqlArg::I64(v); }
+inline SqlArg Str(std::string v) { return SqlArg::Str(std::move(v)); }
+inline SqlArg NullArg() { return SqlArg::Null(); }
 
 class MysqlClient {
  public:
@@ -29,9 +57,16 @@ class MysqlClient {
   bool Available() const { return available_.load(std::memory_order_relaxed); }
   int PoolSize() const { return pool_size_; }
 
-  // Returns affected rows on success, -1 on failure.
+  // Legacy text SQL (prefer *Bind). Returns affected rows on success, -1 on failure.
   int Exec(const std::string& sql);
   std::optional<std::vector<MysqlRow>> Query(const std::string& sql);
+
+  // Prepared statements with bound parameters (`?` placeholders).
+  int ExecBind(const std::string& sql, std::initializer_list<SqlArg> args);
+  int ExecBind(const std::string& sql, const std::vector<SqlArg>& args);
+  std::optional<std::vector<MysqlRow>> QueryBind(const std::string& sql, std::initializer_list<SqlArg> args);
+  std::optional<std::vector<MysqlRow>> QueryBind(const std::string& sql, const std::vector<SqlArg>& args);
+
   std::string LastError() const;
 
  private:
@@ -81,6 +116,10 @@ class MysqlClient {
   void SetError(std::string err) const;
   int ExecOn(Borrowed& b, const std::string& sql);
   std::optional<std::vector<MysqlRow>> QueryOn(Borrowed& b, const std::string& sql);
+
+  int ExecBindOn(Borrowed& b, const std::string& sql, const std::vector<SqlArg>& args);
+  std::optional<std::vector<MysqlRow>> QueryBindOn(Borrowed& b, const std::string& sql,
+                                                   const std::vector<SqlArg>& args);
 
   std::string dsn_;
   std::string host_{"127.0.0.1"};

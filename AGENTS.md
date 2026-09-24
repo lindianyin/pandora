@@ -94,10 +94,11 @@ Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）�
 ### MySQL / Redis 客户端
 
 - 均使用连接池（`pool_size`，见 `server/conf/server.json`），支持失败自动重连并重试一次。
-- MySQL：自建池，借还单连接；`Exec`/`Query`/`Ping` 线程安全。
+- MySQL：自建池 + **`ExecBind`/`QueryBind` 预处理参数绑定**（热路径优先）；遗留 `Exec`/`Query` 仅用于无参 SQL。
 - Redis：`redis-plus-plus` `ConnectionPool`；命令路径线程安全，断线重建整池。
 - `LastError()` 为 thread_local，按调用线程返回。
 - `Available()` 为 atomic 观测值，非强一致。
+- **并发模型**：HTTP 与 WSS 分属独立 `io_context`（`worker.biz_threads` / `net.iocp_workers`）；账变/局记录/活动进度经 `AsyncWorker` 异步落库；`SessionHub`/`MemoryStore`/`RoomManager` 按 uid 或 room_id 分片锁。
 
 ## 编码约定
 
