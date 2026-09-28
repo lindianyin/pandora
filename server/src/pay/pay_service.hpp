@@ -28,6 +28,7 @@ struct PayOrder {
   int diamond{0};
   int status{0};
   std::string alipay_trade_no;
+  std::string created_at;
 };
 
 struct AlipayConfig {

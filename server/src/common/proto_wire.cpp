@@ -4,6 +4,7 @@
 #include <common.pb.h>
 #include <game_ddz.pb.h>
 #include <lobby.pb.h>
+#include <social.pb.h>
 
 namespace pandora {
 namespace proto_wire {
@@ -220,6 +221,22 @@ std::vector<uint8_t> EncodeS2C_ActivityUpdate(int32_t activity_id, const std::st
   m.set_type(type);
   m.set_progress_json(progress_json);
   m.set_claimable(claimable);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_MailNotify(int64_t mail_id, const std::string& title, bool has_attach) {
+  S2C_MailNotify m;
+  m.set_mail_id(mail_id);
+  m.set_title(title);
+  m.set_has_attach(has_attach);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FriendNotify(int32_t kind, int64_t from_uid, const std::string& nickname) {
+  S2C_FriendNotify m;
+  m.set_kind(kind);
+  m.set_from_uid(from_uid);
+  m.set_nickname(nickname);
   return Serialize(m);
 }
 

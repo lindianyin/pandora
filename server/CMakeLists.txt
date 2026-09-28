@@ -23,6 +23,7 @@ set(PROTO_FILES
   "${PROTO_DIR}/lobby.proto"
   "${PROTO_DIR}/game_ddz.proto"
   "${PROTO_DIR}/activity.proto"
+  "${PROTO_DIR}/social.proto"
 )
 
 set(GENERATED_SRCS
@@ -30,12 +31,14 @@ set(GENERATED_SRCS
   "${GENERATED_DIR}/lobby.pb.cc"
   "${GENERATED_DIR}/game_ddz.pb.cc"
   "${GENERATED_DIR}/activity.pb.cc"
+  "${GENERATED_DIR}/social.pb.cc"
 )
 set(GENERATED_HDRS
   "${GENERATED_DIR}/common.pb.h"
   "${GENERATED_DIR}/lobby.pb.h"
   "${GENERATED_DIR}/game_ddz.pb.h"
   "${GENERATED_DIR}/activity.pb.h"
+  "${GENERATED_DIR}/social.pb.h"
 )
 
 add_custom_command(
@@ -70,6 +73,7 @@ add_executable(pandora-server
   src/pay/pay_service.cpp
   src/admin/admin_service.cpp
   src/activity/activity_service.cpp
+  src/social/social_service.cpp
   src/lobby/lobby_service.cpp
   src/match/match_service.cpp
   src/room/room_manager.cpp

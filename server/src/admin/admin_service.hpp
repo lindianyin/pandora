@@ -86,11 +86,12 @@ class AdminService {
   std::string ListProductsJson() const;
   bool UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled, const AdminSession& admin,
                      std::string* err);
+  bool SetProductEnabled(int id, bool enabled, const AdminSession& admin, std::string* err);
   bool DeleteProduct(int id, const AdminSession& admin, std::string* err);
-  std::string ListOrdersJson(int page, int page_size) const;
+  std::string ListOrdersJson(int64_t uid, int status, int page, int page_size) const;
   bool Announce(const std::string& message, const AdminSession& admin, std::string* err);
   bool SetMaintainOp(bool on, const AdminSession& admin, std::string* err);
-  std::string ListAuditJson(int page, int page_size) const;
+  std::string ListAuditJson(const std::string& q, int page, int page_size) const;
 
   std::string ExportLedgersCsv(int limit) const;
   std::string ExportRoundsCsv(int limit) const;

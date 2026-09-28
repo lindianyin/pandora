@@ -18,6 +18,7 @@ const router = createRouter({
         { path: 'pay/products', component: () => import('./views/ProductsView.vue') },
         { path: 'pay/orders', component: () => import('./views/OrdersView.vue') },
         { path: 'announce', component: () => import('./views/AnnounceView.vue') },
+        { path: 'mail', component: () => import('./views/MailView.vue') },
         { path: 'ops', component: () => import('./views/OpsView.vue') },
         { path: 'audit', component: () => import('./views/AuditView.vue') },
         { path: 'activities', component: () => import('./views/ActivitiesView.vue') },

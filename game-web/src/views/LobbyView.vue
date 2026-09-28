@@ -37,6 +37,10 @@ onMounted(() => {
     <div class="row">
       <button class="ghost" @click="router.push('/wallet')">钱包 / 充值</button>
       <button class="ghost" @click="router.push('/activity')">活动中心</button>
+      <button class="ghost" @click="router.push('/record')">战绩</button>
+      <button class="ghost" @click="router.push('/friends')">好友</button>
+      <button class="ghost" @click="router.push('/mail')">邮件</button>
+      <button class="ghost" @click="router.push('/rank')">排行</button>
     </div>
   </section>
 

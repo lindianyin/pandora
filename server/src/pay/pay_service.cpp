@@ -110,12 +110,12 @@ std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
   if (!mysql_.Available()) return out;
   auto rows = mysql_.QueryBind(
       "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,o.alipay_trade_no,"
-      "p.diamond+p.gift_diamond FROM pay_order o "
+      "p.diamond+p.gift_diamond,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') FROM pay_order o "
       "INNER JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
       {I64(static_cast<int64_t>(limit))});
   if (!rows) return out;
   for (const auto& row : *rows) {
-    if (row.cols.size() < 7) continue;
+    if (row.cols.size() < 8) continue;
     PayOrder o;
     o.order_id = row.cols[0];
     try {
@@ -128,6 +128,7 @@ std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
       continue;
     }
     o.alipay_trade_no = row.cols[5];
+    o.created_at = row.cols[7];
     out.push_back(o);
   }
   return out;

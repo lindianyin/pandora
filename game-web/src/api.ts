@@ -116,3 +116,135 @@ export async function claimActivity(token: string, activityId: number, rewardKey
   return (await res.json()) as ApiResult<{ balance: number; currency: number }>
 }
 
+export type RecordSummary = {
+  total_rounds: number
+  win_rounds: number
+  lose_rounds: number
+  win_rate_bp: number
+  landlord_rounds: number
+  gold_win_sum: number
+  gold_lose_sum: number
+}
+
+export type RecentRound = {
+  round_id: number
+  template_id: number
+  ended_at: string
+  base_score: number
+  multiplier: number
+  delta_gold: number
+  is_landlord: boolean
+  result: string
+}
+
+export async function fetchRecordSummary(token: string) {
+  const res = await fetch(`${API_BASE}/api/v1/record/summary`, { headers: authHeaders(token) })
+  return (await res.json()) as ApiResult<RecordSummary>
+}
+
+export async function fetchRecordRecent(token: string, page = 1, pageSize = 20) {
+  const res = await fetch(`${API_BASE}/api/v1/record/recent?page=${page}&page_size=${pageSize}`, {
+    headers: authHeaders(token),
+  })
+  return (await res.json()) as ApiResult<{ items: RecentRound[]; total: number }>
+}
+
+export type FriendItem = { uid: number; nickname: string; online: boolean }
+
+export async function fetchFriends(token: string) {
+  const res = await fetch(`${API_BASE}/api/v1/friend/list`, { headers: authHeaders(token) })
+  return (await res.json()) as ApiResult<{
+    items: FriendItem[]
+    pending?: { incoming: Array<{ id: number; from_uid: number; nickname: string }>; outgoing: unknown[] }
+  }>
+}
+
+export async function friendRequest(token: string, toUid: number) {
+  const res = await fetch(`${API_BASE}/api/v1/friend/request`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ to_uid: toUid }),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export async function friendAccept(token: string, fromUid: number) {
+  const res = await fetch(`${API_BASE}/api/v1/friend/accept`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ from_uid: fromUid }),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export async function friendReject(token: string, fromUid: number) {
+  const res = await fetch(`${API_BASE}/api/v1/friend/reject`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ from_uid: fromUid }),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export async function friendRemove(token: string, friendUid: number) {
+  const res = await fetch(`${API_BASE}/api/v1/friend/remove`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ friend_uid: friendUid }),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export type MailItem = {
+  id: number
+  title: string
+  body: string
+  attach_json: { currency?: number; amount?: number }
+  status: number
+  expire_at: string
+  created_at: string
+}
+
+export async function fetchMails(token: string) {
+  const res = await fetch(`${API_BASE}/api/v1/mail/list`, { headers: authHeaders(token) })
+  return (await res.json()) as ApiResult<{ items: MailItem[] }>
+}
+
+export async function mailRead(token: string, id: number) {
+  const res = await fetch(`${API_BASE}/api/v1/mail/${id}/read`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export async function mailClaim(token: string, id: number) {
+  const res = await fetch(`${API_BASE}/api/v1/mail/${id}/claim`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  return (await res.json()) as ApiResult<{ balance: number; currency: number }>
+}
+
+export async function mailDelete(token: string, id: number) {
+  const res = await fetch(`${API_BASE}/api/v1/mail/${id}/delete`, {
+    method: 'POST',
+    headers: authHeaders(token),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean }>
+}
+
+export type RankEntry = { rank: number; uid: number; nickname: string; score: number }
+
+export async function fetchRank(token: string, period: 'daily' | 'weekly', limit = 50) {
+  const res = await fetch(`${API_BASE}/api/v1/rank/${period}?limit=${limit}`, {
+    headers: authHeaders(token),
+  })
+  return (await res.json()) as ApiResult<{
+    period: string
+    period_key: string
+    list: RankEntry[]
+    me: { rank: number; score: number }
+  }>
+}
+

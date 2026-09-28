@@ -7,6 +7,8 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace sw {
 namespace redis {
@@ -30,9 +32,19 @@ class RedisClient {
   int PoolSize() const { return pool_size_; }
 
   bool Set(const std::string& key, const std::string& value, int ttl_sec = 0);
+  // SET NX: returns true only when key was newly set.
+  bool SetNx(const std::string& key, const std::string& value, int ttl_sec = 0);
   std::optional<std::string> Get(const std::string& key);
   bool Del(const std::string& key);
   std::optional<int64_t> Decr(const std::string& key);
+  bool Expire(const std::string& key, int ttl_sec);
+  bool ZAdd(const std::string& key, const std::string& member, double score);
+  // Descending range with scores; out as (member, score) pairs.
+  bool ZRevRangeWithScores(const std::string& key, long long start, long long stop,
+                           std::vector<std::pair<std::string, double>>* out);
+  // 0-based rank from highest score; nullopt if member missing.
+  std::optional<long long> ZRevRank(const std::string& key, const std::string& member);
+  std::optional<double> ZScore(const std::string& key, const std::string& member);
   std::string LastError() const;
 
  private:

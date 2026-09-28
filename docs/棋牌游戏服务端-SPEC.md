@@ -2,9 +2,9 @@
 
 | 项目 | 内容 |
 |------|------|
-| 文档版本 | V1.1 |
-| 创建日期 | 2026-09-23 |
-| 文档状态 | 修订（基于 SRS V1.14） |
+| 文档版本 | V1.2 |
+| 创建日期 | 2026-09-28 |
+| 文档状态 | 修订（基于 SRS V1.14；增补 FR-SOC） |
 | 依据文档 | [棋牌游戏服务端-需求文档.md](./棋牌游戏服务端-需求文档.md) |
 | 适用范围 | 游戏服（C++/MSVC 单体）、**简单版网页客户端（Vue）**、运营后台（Vue）、协议与数据契约 |
 
@@ -48,7 +48,8 @@ pandora/
 │   ├── common.proto
 │   ├── lobby.proto
 │   ├── game_ddz.proto
-│   └── activity.proto
+│   ├── activity.proto
+│   └── social.proto            # 战绩推送/邮件/好友通知（M7）
 ├── server/                     # C++ 游戏服
 │   ├── CMakeLists.txt / pandora.sln
 │   ├── src/
@@ -70,7 +71,7 @@ pandora/
 ├── game-web/                   # Vue 简单版网页游戏客户端
 │   ├── package.json
 │   └── src/
-│       ├── views/              # login / lobby / table / activity
+│       ├── views/              # login / lobby / table / activity / record / friends / mail / rank
 │       ├── net/                # WSS + 帧编解码
 │       └── proto/              # 生成或引用 ../../proto
 └── admin-web/                  # Vue 运营后台
@@ -148,7 +149,20 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 ```
 
 `currency`: `1=金币`, `2=钻石`  
-`biz_type`: `game_settle | pay_recharge | exchange | activity_reward | gm_adjust | ...`
+`biz_type`: `game_settle | pay_recharge | exchange | activity_reward | gm_adjust | mail_reward | ...`
+
+### 3.4 社交模块接口（概念）
+
+```text
+SocialService
+  Record.OnRoundSettled(round)          // 结算后更新战绩汇总（可异步）
+  Friend.List / Request / Accept / Reject / Remove
+  Mail.Send(system|admin) / List / Read / Claim / Delete
+  Rank.OnGoldChanged(uid, gold)         // 钱包变更后刷新 ZSET（可异步）
+  Rank.SnapshotDaily / SnapshotWeekly   // 定时落库
+```
+
+依赖：`Record`/`Rank` 读 `game_round` / `player_profile`；`Mail.Claim` → `wallet.Adjust`；推送经 `SessionHub`。
 
 ---
 
@@ -184,6 +198,7 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | 1000 – 1999 | 大厅/房间/匹配 |
 | 2000 – 2999 | 斗地主对局 |
 | 3000 – 3999 | 活动推送 |
+| 4000 – 4999 | 社交（邮件通知、好友状态等，P1） |
 | 9000 – 9999 | 调试/保留 |
 
 #### 4.3.1 公共消息
@@ -232,7 +247,14 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 |--------|------|---------------|------|
 | 3001 | S→C | `S2C_ActivityUpdate` | 进度/可领变更 |
 
-> `.proto` 字段定义在实现时落库到 `proto/`；本 SPEC 锁定 msg_id 与消息名。变更字段遵守 proto3 兼容规则。
+#### 4.3.5 社交（P1，邮件/好友推送）
+
+| msg_id | 方向 | proto message | 说明 |
+|--------|------|---------------|------|
+| 4001 | S→C | `S2C_MailNotify` | 新邮件到达（摘要） |
+| 4002 | S→C | `S2C_FriendNotify` | 好友申请/同意/上线（可配） |
+
+> `.proto` 字段定义在实现时落库到 `proto/`（建议拆分 `social.proto`）；本 SPEC 锁定 msg_id 与消息名。变更字段遵守 proto3 兼容规则。
 
 ### 4.4 防重放（长连接）
 
@@ -268,6 +290,9 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | 2001 | 金币不足 |
 | 2002 | 重复操作（幂等命中） |
 | 2003 | 活动不可领 |
+| 2101 | 好友申请非法 / 已是好友 / 人数达上限 |
+| 2102 | 邮件不存在或已领取 |
+| 2103 | 排行榜类型/周期非法 |
 | 3001 | 支付下单失败 |
 | 3002 | 订单状态非法 |
 | 5000 | 维护中 |
@@ -281,7 +306,18 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | POST | `/api/v1/auth/login` | 登录（guest/phone…） | 否 |
 | POST | `/api/v1/auth/refresh` | 刷新 token | 是 |
 | GET | `/api/v1/player/profile` | 资料+余额 | 是 |
-| GET | `/api/v1/record/recent` | 近战绩 | 是 |
+| GET | `/api/v1/record/summary` | 个人战绩汇总（FR-SOC-01） | 是 |
+| GET | `/api/v1/record/recent` | 近期对局列表（FR-SOC-01） | 是 |
+| GET | `/api/v1/friend/list` | 好友列表（FR-SOC-02） | 是 |
+| POST | `/api/v1/friend/request` | 发起好友申请 | 是 |
+| POST | `/api/v1/friend/accept` | 同意申请 | 是 |
+| POST | `/api/v1/friend/reject` | 拒绝申请 | 是 |
+| POST | `/api/v1/friend/remove` | 删除好友 | 是 |
+| GET | `/api/v1/mail/list` | 邮件列表（FR-SOC-03） | 是 |
+| POST | `/api/v1/mail/{id}/read` | 标记已读 | 是 |
+| POST | `/api/v1/mail/{id}/claim` | 领取附件（幂等） | 是 |
+| POST | `/api/v1/mail/{id}/delete` | 删除邮件 | 是 |
+| GET | `/api/v1/rank/{period}` | 排行榜 `daily`/`weekly`（FR-SOC-04） | 是 |
 | GET | `/api/v1/activity/list` | 活动列表 | 是 |
 | GET | `/api/v1/activity/{id}/progress` | 进度 | 是 |
 | POST | `/api/v1/activity/{id}/claim` | 领奖（body: `reward_key`） | 是 |
@@ -328,6 +364,9 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | GET/PUT | `/admin/v1/rooms/templates` | 场次配置 | ops |
 | CRUD | `/admin/v1/activities` | 活动 | ops |
 | POST | `/admin/v1/announce` | 公告 | ops |
+| POST | `/admin/v1/mail/send` | 系统邮件（全服/指定 uid 列表） | ops |
+| GET | `/admin/v1/mail` | 邮件发送记录查询 | cs |
+| GET | `/admin/v1/rank/snapshot` | 排行快照查询 | cs |
 | POST | `/admin/v1/ops/maintain` | 维护开关 | super |
 | CRUD | `/admin/v1/pay/products` | 充值档位 | ops |
 | GET | `/admin/v1/pay/orders` | 订单 | cs |
@@ -404,6 +443,90 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | multiplier | INT | |
 | started_at / ended_at | DATETIME(3) NOT NULL | 结算写入时双端同设 |
 
+> `players_json` 元素约定（NOT NULL 对象数组）：
+> `[{ "uid":1, "seat_id":0, "delta":100, "is_landlord":true }, ...]`  
+> 战绩列表优先扫本表；汇总表 `player_stats` 做加速。
+
+#### `player_stats`（FR-SOC-01）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| uid | BIGINT PK | |
+| total_rounds | INT NOT NULL DEFAULT 0 | 总局数 |
+| win_rounds | INT NOT NULL DEFAULT 0 | 胜局 |
+| lose_rounds | INT NOT NULL DEFAULT 0 | 负局 |
+| landlord_rounds | INT NOT NULL DEFAULT 0 | 地主局数 |
+| gold_win_sum | BIGINT NOT NULL DEFAULT 0 | 累计赢金（仅正 delta 之和） |
+| gold_lose_sum | BIGINT NOT NULL DEFAULT 0 | 累计输金（|负 delta| 之和） |
+| updated_at | DATETIME(3) NOT NULL | |
+
+结算成功后：`INSERT ... ON DUPLICATE KEY UPDATE` 递增；失败不落。
+
+#### `friend_request`（FR-SOC-02）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | BIGINT PK AI | |
+| from_uid | BIGINT NOT NULL | |
+| to_uid | BIGINT NOT NULL | |
+| status | TINYINT NOT NULL DEFAULT 0 | 0 待处理 1 已同意 2 已拒绝 3 已过期 |
+| created_at | DATETIME(3) NOT NULL | |
+| updated_at | DATETIME(3) NOT NULL | |
+| UNIQUE | `(from_uid, to_uid)` where status=0 | 实现可用普通 UNIQUE(from,to) + 业务校验 |
+
+#### `friendship`（FR-SOC-02）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| uid_low | BIGINT NOT NULL | min(uid_a, uid_b) |
+| uid_high | BIGINT NOT NULL | max(uid_a, uid_b) |
+| created_at | DATETIME(3) NOT NULL | |
+| PRIMARY KEY | `(uid_low, uid_high)` | 无向边去重 |
+
+约束：单用户好友上限默认 **100**（配置 `social.friend_max`）；禁止加自己。
+
+#### `mail`（FR-SOC-03）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | BIGINT PK AI | |
+| to_uid | BIGINT NOT NULL | `0`=全服模板展开时写具体 uid；发送任务另表可选 |
+| title | VARCHAR(128) NOT NULL | |
+| body | VARCHAR(1024) NOT NULL DEFAULT '' | |
+| attach_json | JSON NOT NULL | 空 `{}`；例 `{"currency":1,"amount":500}` |
+| status | TINYINT NOT NULL DEFAULT 0 | 0 未读 1 已读 2 已领附件 3 已删 |
+| expire_at | DATETIME(3) NOT NULL | 默认创建+30 天 |
+| created_at | DATETIME(3) NOT NULL | |
+| KEY | `(to_uid, status, id)` | |
+
+领取附件幂等键：`mail:{mail_id}:{uid}` → `wallet.Adjust`；`biz_type=mail_reward`。
+
+#### `mail_send_log`（Admin）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | BIGINT PK AI | |
+| admin_id | INT NOT NULL | |
+| scope | VARCHAR(16) NOT NULL | `uids` / `all` |
+| target_json | JSON NOT NULL | uid 列表或 `{}` |
+| title | VARCHAR(128) NOT NULL | |
+| body | VARCHAR(1024) NOT NULL DEFAULT '' | |
+| attach_json | JSON NOT NULL | |
+| created_at | DATETIME(3) NOT NULL | |
+
+#### `rank_snapshot`（FR-SOC-04）
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | BIGINT PK AI | |
+| period | VARCHAR(16) NOT NULL | `daily` / `weekly` |
+| period_key | VARCHAR(16) NOT NULL | `20260928` / `2026W39` |
+| uid | BIGINT NOT NULL | |
+| score | BIGINT NOT NULL | 排行分（默认=当前金币快照或周期内净赢金，见 §10.4） |
+| rank_no | INT NOT NULL | 名次 |
+| created_at | DATETIME(3) NOT NULL | |
+| UNIQUE | `(period, period_key, uid)` | |
+
 #### `activity_define` / `activity_progress` / `activity_claim`
 
 - `activity_define`：type(`sign`/`task`/`gift`)、规则 JSON、时间窗（`start_at`/`end_at` NOT NULL；哨兵 `1970-01-01` / `9999-12-31` 表示无窗）、enabled  
@@ -454,8 +577,13 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | `act:stock:{aid}` | STRING | — | 库存原子减 |
 | `cfg:room_templates` | STRING | 主动失效 | 场次缓存 |
 | `rl:{uid}:{action}` | STRING | 窗口 | 限流 |
+| `friend:{uid}` | SET | 可重建 | 好友 uid 集合缓存（可选） |
+| `mail:unread:{uid}` | STRING | 24h | 未读数缓存（可选） |
+| `rank:gold:daily:{yyyymmdd}` | ZSET | 48h | 日榜：member=uid，score=见 §10.4 |
+| `rank:gold:weekly:{yyyy}W{ww}` | ZSET | 16d | 周榜 |
+| `rank:me:{period}:{uid}` | STRING | 同榜 TTL | 个人名次缓存（可选） |
 
-原则：余额以 MySQL 为准；Redis 余额缓存若使用，必须以 DB 事务成功后再写。
+原则：余额以 MySQL 为准；Redis 余额缓存若使用，必须以 DB 事务成功后再写。排行 ZSET **可重建**（从 `player_profile.gold` 或 `rank_snapshot` 回灌）。
 
 ---
 
@@ -485,7 +613,7 @@ WaitReady → Deal → Bid → Play → Settle → (WaitReady | Destroy)
 | Deal | 每人 17 张，剩 3 张底牌；进入 Bid |
 | Bid | 逆时针叫分；确定地主后亮底牌归地主；倍数初值=叫分 |
 | Play | 地主先出；校验牌型；炸弹/王炸翻倍；出完进入 Settle |
-| Settle | 计算输赢金币、抽水、写 ledger、推送 `S2C_DdzSettle`、通知活动 |
+| Settle | 计算输赢金币、抽水、写 ledger、推送 `S2C_DdzSettle`、通知活动与战绩汇总 |
 
 ### 7.3 牌型（首发）
 
@@ -564,7 +692,149 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 
 ---
 
-## 10. 匹配规格
+## 10. 社交与战绩规格（FR-SOC）
+
+> 对应 SRS §3.7。实现落点：`server/src/social/`、`proto/social.proto`（新建）、玩家 REST 见 §5.3。  
+> **现状**：代码尚未交付（`social/` 为空壳）；本节为可开发契约。列约定仍遵守「无可空列」。
+
+### 10.1 FR-SOC-01 个人战绩 / 近期对局（P0）
+
+**数据流**
+
+```text
+Ddz Settle → Admin.RecordRound(game_round)
+           → Social.Record.OnRoundSettled → 更新 player_stats（AsyncWorker）
+```
+
+**查询**
+
+| API | 行为 |
+|-----|------|
+| `GET /api/v1/record/summary` | 读 `player_stats`；无行则返回全 0 |
+| `GET /api/v1/record/recent?page=&page_size=` | `game_round` 中 `players_json` 含本 uid，按 `ended_at DESC` |
+
+**summary data 示例**
+
+```json
+{
+  "total_rounds": 12,
+  "win_rounds": 7,
+  "lose_rounds": 5,
+  "win_rate_bp": 5833,
+  "landlord_rounds": 4,
+  "gold_win_sum": 120000,
+  "gold_lose_sum": 80000
+}
+```
+
+`win_rate_bp`：胜率万分比，`total_rounds=0` 时为 0。
+
+**recent item 示例**
+
+```json
+{
+  "round_id": 10001,
+  "template_id": 1,
+  "ended_at": "2026-09-28 12:00:00.000",
+  "base_score": 100,
+  "multiplier": 2,
+  "delta_gold": 190,
+  "is_landlord": true,
+  "result": "win"
+}
+```
+
+从 `players_json` 解析本 uid 的 `delta`；`result`=`win|lose|draw`（delta=0 为 draw）。
+
+### 10.2 FR-SOC-02 好友（P1）
+
+**状态机（申请）**
+
+```text
+none → (request) pending → accept → friendship
+                         → reject → 结束
+                         → 超时(默认 7d) → expired
+```
+
+**规则**
+
+- 双向好友；存无向边 `(uid_low, uid_high)`  
+- 上限 `social.friend_max`（默认 100）  
+- 已是好友 / 有 pending / 自己 → `2101`  
+- 同意后删 pending，写 `friendship`，可选推送 `S2C_FriendNotify`  
+
+**list data**：`[{ "uid", "nickname", "online": bool }]`；`online` 查 `SessionHub`（或未来 `online:{uid}`）。
+
+### 10.3 FR-SOC-03 邮件 / 系统通知（P1）
+
+**通道**
+
+| 来源 | 说明 |
+|------|------|
+| Admin `POST /admin/v1/mail/send` | 运营发奖/通知；写 `mail_send_log` + 逐 uid 插 `mail`（全服异步批次） |
+| 系统 | 维护结束、大额账变等（可选，首发可仅 Admin） |
+
+**玩家行为**：列表（过滤 `status!=3` 且未过期）→ 已读 → 领附件（有 `attach_json.amount`）→ 删除。  
+**推送**：入库后若在线，发 `S2C_MailNotify{ mail_id, title, has_attach }`。  
+**过期**：`expire_at` 后不可领；异步清理或查询时过滤。
+
+### 10.4 FR-SOC-04 排行榜日/周（P1）
+
+**计分（首发默认）**
+
+- **日榜 / 周榜 score = 玩家当前金币**（`player_profile.gold`）  
+- 变更路径：`Wallet.Adjust` 成功且 currency=金币 → 异步 `ZADD` 两个 ZSET  
+- 备选（配置 `rank.score_mode`）：`net_win`=周期内结算净赢金（需额外累加器，二期）
+
+**Redis**
+
+- `rank:gold:daily:{yyyymmdd}`、`rank:gold:weekly:{yyyy}W{ww}`（ISO 周）  
+- `ZREVRANGE 0 99 WITHSCORES` 取 Top100  
+- 个人名次：`ZREVRANK` +1  
+
+**落库**
+
+- 每日 00:05、每周一 00:10（可配）将 TopN（默认 100）写入 `rank_snapshot`  
+- 旧 ZSET 按 TTL 过期；快照保留 ≥ 90 天（运维归档）
+
+**API** `GET /api/v1/rank/{period}?limit=50`
+
+```json
+{
+  "period": "daily",
+  "period_key": "20260928",
+  "list": [{ "rank": 1, "uid": 2, "nickname": "A", "score": 50000 }],
+  "me": { "rank": 12, "score": 12000 }
+}
+```
+
+未上榜 `me.rank=0`。
+
+### 10.5 配置键
+
+```json
+"social": {
+  "friend_max": 100,
+  "friend_request_ttl_days": 7,
+  "mail_expire_days": 30,
+  "mail_broadcast_batch": 500,
+  "rank_top_n": 100,
+  "rank_score_mode": "gold"
+}
+```
+
+### 10.6 验收（对照 SRS）
+
+| ID | 验收 |
+|----|------|
+| FR-SOC-01 | 打完一局后 summary/recent 可见本局；重复结算不双计 |
+| FR-SOC-02 | 双端互加好友、列表、删除；超上限失败 |
+| FR-SOC-03 | Admin 发带金币附件邮件 → 玩家领取到账且幂等 |
+| FR-SOC-04 | 金币变化后日/周榜顺序正确；跨日后新 key；快照表有行 |
+
+---
+
+## 11. 匹配规格
 
 - 队列键：`match:q:{template_id}`  
 - 入队条件：金币 ∈ [min,max]，未封禁，未在房间  
@@ -574,9 +844,9 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 
 ---
 
-## 11. 配置规格
+## 12. 配置规格
 
-### 11.1 文件示例（`conf/server.json` 逻辑字段）
+### 12.1 文件示例（`conf/server.json` 逻辑字段）
 
 ```json
 {
@@ -609,27 +879,35 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
     "gateway": "https://openapi.alipay.com/gateway.do",
     "notify_url": "https://api.example.com/api/v1/pay/alipay/notify"
   },
-  "worker": { "biz_threads": 8, "async_threads": 4 }
+  "worker": { "biz_threads": 8, "async_threads": 4 },
+  "social": {
+    "friend_max": 100,
+    "friend_request_ttl_days": 7,
+    "mail_expire_days": 30,
+    "mail_broadcast_batch": 500,
+    "rank_top_n": 100,
+    "rank_score_mode": "gold"
+  }
 }
 ```
 
 密钥禁止入库；用环境变量覆盖敏感字段。
 
-### 11.2 热更
+### 12.2 热更
 
-后台改 `room_template` / 活动 / 公告 → 进程内刷新缓存 → 对在线连接广播（维护/公告/活动刷新）。
+后台改 `room_template` / 活动 / 公告 / 邮件广播 → 进程内刷新缓存 → 对在线连接广播（维护/公告/活动刷新/邮件通知）。
 
 ---
 
-## 12. 运营后台（Vue）规格
+## 13. 运营后台（Vue）规格
 
-### 12.1 技术
+### 13.1 技术
 
 - Vue 3 + Vue Router + Pinia（建议）  
 - UI：Element Plus / Naive UI 任选  
 - 构建静态资源；Nginx HTTPS；**域名与证书由运维提供**  
 
-### 12.2 页面
+### 13.2 页面
 
 | 路由 | 页面 | 角色 |
 |------|------|------|
@@ -643,12 +921,14 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 | /pay/products | 充值档位 | ops+ |
 | /pay/orders | 订单 | cs+ |
 | /announce | 公告 | ops+ |
+| /mail | 系统邮件发送与记录 | ops+ |
+| /rank | 排行快照查询 | cs+ |
 | /ops | 维护/白名单 | super |
 | /audit | 审计 | super |
 
 ---
 
-## 12.3 简单版网页游戏客户端（game-web）
+## 13.3 简单版网页游戏客户端（game-web）
 
 ### 目标
 
@@ -669,6 +949,10 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 | `/table` | 斗地主桌面：手牌、叫分/出牌/过、倒计时、结算弹层 |
 | `/activity` | 活动列表与领奖（至少签到或任务一类） |
 | `/wallet` | 余额、兑换、充值档位（支付 P1） |
+| `/record` | 战绩汇总 + 近期对局（FR-SOC-01，P0） |
+| `/friends` | 好友列表/申请（FR-SOC-02，P1） |
+| `/mail` | 邮件列表/领取（FR-SOC-03，P1） |
+| `/rank` | 日/周排行榜（FR-SOC-04，P1） |
 
 ### 对局桌最小交互
 
@@ -682,26 +966,27 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 
 - 同一浏览器 **三开窗口**（或隐身窗口）可凑一桌打完一局  
 - 编解码与服务端抓包帧一致  
+- P0：战绩页在一局后有数据；P1：好友/邮件/排行可演示  
 
 ---
 
-## 13. 可观测性
+## 14. 可观测性
 
-### 13.1 日志字段
+### 14.1 日志字段
 
 `ts, level, trace_id, uid, room_id, round_id, msg_id, code, err`
 
-### 13.2 指标（最低）
+### 14.2 指标（最低）
 
-`conn_gauge, match_queue_len, room_active, settle_qps, settle_fail, pay_success, async_queue_len, login_qps`
+`conn_gauge, match_queue_len, room_active, settle_qps, settle_fail, pay_success, async_queue_len, login_qps, mail_send_qps, rank_zcard`
 
-### 13.3 健康检查
+### 14.3 健康检查
 
 `GET /health` → `{ "status":"ok", "mysql":true, "redis":true, "ccu":1234 }`
 
 ---
 
-## 14. 里程碑实现切片（对照 SRS）
+## 15. 里程碑实现切片（对照 SRS）
 
 | 里程碑 | SPEC 交付要点 |
 |--------|----------------|
@@ -712,10 +997,11 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 | M4 | admin API + admin-web、场次热更、审计 |
 | M5 | sign/task/gift 实时进度；**网页活动页** |
 | M6 | 单实例 2 万 CCU 压测与调优 |
+| M7 | **社交 FR-SOC**：战绩 P0；好友/邮件/排行 P1；`social.proto` + Admin 邮件/排行页 |
 
 ---
 
-## 15. 验收映射（摘要）
+## 16. 验收映射（摘要）
 
 | SRS 验收点 | SPEC 验证方式 |
 |------------|----------------|
@@ -726,15 +1012,17 @@ Settle 成功 → Activity.OnGameSettled(uid, template_id, ...) 同步更新
 | 无 Kafka/微服务 | 部署拓扑检查 |
 | Vue 运营后台 | 用例清单走查 |
 | 简单网页客户端 | 三开窗口打完一局 + 活动领奖演示 |
+| FR-SOC-01～04 | 见 §10.6 |
 
 ---
 
-## 16. 变更记录
+## 17. 变更记录
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
 | V1.0 | 2026-09-23 | 初版，依据 SRS V1.13 |
 | V1.1 | 2026-09-23 | 增加简单版网页游戏客户端（game-web），对齐 SRS V1.14 |
+| V1.2 | 2026-09-28 | 新增 §10 社交与战绩（FR-SOC）：表/Redis/API/msg_id/模块接口；里程碑 M7 |
 
 ---
 

@@ -33,6 +33,30 @@ const router = createRouter({
       component: () => import('./views/ActivityView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/record',
+      name: 'record',
+      component: () => import('./views/RecordView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/friends',
+      name: 'friends',
+      component: () => import('./views/FriendsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/mail',
+      name: 'mail',
+      component: () => import('./views/MailView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/rank',
+      name: 'rank',
+      component: () => import('./views/RankView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

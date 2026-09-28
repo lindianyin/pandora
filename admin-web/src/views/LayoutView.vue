@@ -13,6 +13,7 @@ const menus = [
   { path: '/pay/products', title: '充值档位' },
   { path: '/pay/orders', title: '订单' },
   { path: '/announce', title: '公告' },
+  { path: '/mail', title: '邮件' },
   { path: '/ops', title: '运维' },
   { path: '/audit', title: '审计' },
   { path: '/activities', title: '活动' },

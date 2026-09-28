@@ -149,6 +149,18 @@ bool RedisClient::Set(const std::string& key, const std::string& value, int ttl_
   });
 }
 
+bool RedisClient::SetNx(const std::string& key, const std::string& value, int ttl_sec) {
+  bool created = false;
+  const bool ok = RunWithRetry([&](sw::redis::Redis& r) {
+    if (ttl_sec > 0) {
+      created = r.set(key, value, std::chrono::milliseconds(ttl_sec * 1000LL), sw::redis::UpdateType::NOT_EXIST);
+    } else {
+      created = r.set(key, value, false, sw::redis::UpdateType::NOT_EXIST);
+    }
+  });
+  return ok && created;
+}
+
 std::optional<std::string> RedisClient::Get(const std::string& key) {
   std::optional<std::string> out;
   const bool ok = RunWithRetry([&](sw::redis::Redis& r) {
@@ -167,6 +179,47 @@ bool RedisClient::Del(const std::string& key) {
 std::optional<int64_t> RedisClient::Decr(const std::string& key) {
   std::optional<int64_t> out;
   const bool ok = RunWithRetry([&](sw::redis::Redis& r) { out = r.decr(key); });
+  if (!ok) return std::nullopt;
+  return out;
+}
+
+bool RedisClient::Expire(const std::string& key, int ttl_sec) {
+  if (ttl_sec <= 0) return true;
+  return RunWithRetry([&](sw::redis::Redis& r) { r.expire(key, std::chrono::seconds(ttl_sec)); });
+}
+
+bool RedisClient::ZAdd(const std::string& key, const std::string& member, double score) {
+  return RunWithRetry([&](sw::redis::Redis& r) { r.zadd(key, member, score); });
+}
+
+bool RedisClient::ZRevRangeWithScores(const std::string& key, long long start, long long stop,
+                                      std::vector<std::pair<std::string, double>>* out) {
+  if (!out) return false;
+  out->clear();
+  return RunWithRetry([&](sw::redis::Redis& r) {
+    // Output pair<> triggers WITHSCORES in redis-plus-plus.
+    r.zrevrange(key, start, stop, std::back_inserter(*out));
+  });
+}
+
+std::optional<long long> RedisClient::ZRevRank(const std::string& key, const std::string& member) {
+  std::optional<long long> out;
+  const bool ok = RunWithRetry([&](sw::redis::Redis& r) {
+    auto v = r.zrevrank(key, member);
+    if (v) out = *v;
+    else out = std::nullopt;
+  });
+  if (!ok) return std::nullopt;
+  return out;
+}
+
+std::optional<double> RedisClient::ZScore(const std::string& key, const std::string& member) {
+  std::optional<double> out;
+  const bool ok = RunWithRetry([&](sw::redis::Redis& r) {
+    auto v = r.zscore(key, member);
+    if (v) out = *v;
+    else out = std::nullopt;
+  });
   if (!ok) return std::nullopt;
   return out;
 }

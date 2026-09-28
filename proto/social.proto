@@ -1,0 +1,16 @@
+syntax = "proto3";
+package pandora;
+
+// msg_id = 4001
+message S2C_MailNotify {
+  int64 mail_id = 1;
+  string title = 2;
+  bool has_attach = 3;
+}
+
+// msg_id = 4002
+message S2C_FriendNotify {
+  int32 kind = 1;  // 1=request 2=accepted 3=online
+  int64 from_uid = 2;
+  string nickname = 3;
+}

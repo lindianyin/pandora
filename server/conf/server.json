@@ -46,6 +46,14 @@
   "worker": {
     "biz_threads": 4,
     "async_threads": 2
+  },
+  "social": {
+    "friend_max": 100,
+    "friend_request_ttl_days": 7,
+    "mail_expire_days": 30,
+    "mail_broadcast_batch": 500,
+    "rank_top_n": 100,
+    "rank_score_mode": "gold"
   }
 }
 

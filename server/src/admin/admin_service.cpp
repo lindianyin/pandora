@@ -264,10 +264,16 @@ std::string AdminService::DashboardJson() const {
 std::string AdminService::ListPlayersJson(const std::string& q, int page, int page_size) const {
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
-  std::vector<PlayerRecord> filtered;
+  if (page_size > 100) page_size = 100;
+  struct Row {
+    PlayerRecord p;
+    std::string created_at;
+  };
+  std::vector<Row> filtered;
   if (mysql_.Available()) {
     std::string sql =
-        "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
+        "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond,"
+        "DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') "
         "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid";
     if (!q.empty()) {
       sql += " WHERE CAST(u.uid AS CHAR) LIKE '%" + Escape(q) + "%' OR p.nickname LIKE '%" + Escape(q) +
@@ -277,35 +283,37 @@ std::string AdminService::ListPlayersJson(const std::string& q, int page, int pa
     auto rows = mysql_.Query(sql);
     if (rows) {
       for (const auto& row : *rows) {
-        if (row.cols.size() < 6) continue;
-        PlayerRecord p;
+        if (row.cols.size() < 7) continue;
+        Row r;
         try {
-          p.uid = std::stoll(row.cols[0]);
-          p.open_id = row.cols[1];
-          p.status = std::stoi(row.cols[2]);
-          p.nickname = row.cols[3];
-          p.gold = std::stoll(row.cols[4]);
-          p.diamond = std::stoll(row.cols[5]);
+          r.p.uid = std::stoll(row.cols[0]);
+          r.p.open_id = row.cols[1];
+          r.p.status = std::stoi(row.cols[2]);
+          r.p.nickname = row.cols[3];
+          r.p.gold = std::stoll(row.cols[4]);
+          r.p.diamond = std::stoll(row.cols[5]);
+          r.created_at = row.cols[6];
         } catch (...) {
           continue;
         }
-        filtered.push_back(p);
+        filtered.push_back(std::move(r));
       }
     }
   } else {
-    filtered = store_.ListPlayers(200);
+    for (auto& p : store_.ListPlayers(200)) filtered.push_back(Row{std::move(p), {}});
   }
   const int total = static_cast<int>(filtered.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
-    const auto& p = filtered[static_cast<size_t>(i)];
-    items.push_back({{"uid", p.uid},
-                     {"nickname", p.nickname},
-                     {"gold", p.gold},
-                     {"diamond", p.diamond},
-                     {"status", p.status},
-                     {"online", hub_.IsOnline(p.uid)}});
+    const auto& r = filtered[static_cast<size_t>(i)];
+    items.push_back({{"uid", r.p.uid},
+                     {"nickname", r.p.nickname},
+                     {"gold", r.p.gold},
+                     {"diamond", r.p.diamond},
+                     {"status", r.p.status},
+                     {"online", hub_.IsOnline(r.p.uid)},
+                     {"created_at", r.created_at}});
   }
   return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
@@ -356,47 +364,55 @@ bool AdminService::WalletAdjust(int64_t uid, int currency, int64_t delta, const 
 std::string AdminService::ListLedgersJson(int64_t uid, int page, int page_size) const {
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
-  std::vector<LedgerEntry> all;
+  if (page_size > 100) page_size = 100;
+  struct Row {
+    LedgerEntry e;
+    std::string created_at;
+  };
+  std::vector<Row> all;
   if (mysql_.Available()) {
     std::string sql =
-        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger";
+        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id,"
+        "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM ledger";
     if (uid > 0) sql += " WHERE uid=" + std::to_string(uid);
     sql += " ORDER BY id DESC LIMIT 500";
     auto rows = mysql_.Query(sql);
     if (rows) {
       for (const auto& row : *rows) {
-        if (row.cols.size() < 8) continue;
-        LedgerEntry e;
+        if (row.cols.size() < 9) continue;
+        Row r;
         try {
-          e.id = std::stoll(row.cols[0]);
-          e.uid = std::stoll(row.cols[1]);
-          e.currency = std::stoi(row.cols[2]);
-          e.delta = std::stoll(row.cols[3]);
-          e.balance_after = std::stoll(row.cols[4]);
-          e.biz_type = row.cols[5];
-          e.idempotent_key = row.cols[6];
-          e.ref_id = row.cols[7];
+          r.e.id = std::stoll(row.cols[0]);
+          r.e.uid = std::stoll(row.cols[1]);
+          r.e.currency = std::stoi(row.cols[2]);
+          r.e.delta = std::stoll(row.cols[3]);
+          r.e.balance_after = std::stoll(row.cols[4]);
+          r.e.biz_type = row.cols[5];
+          r.e.idempotent_key = row.cols[6];
+          r.e.ref_id = row.cols[7];
+          r.created_at = row.cols[8];
         } catch (...) {
           continue;
         }
-        all.push_back(e);
+        all.push_back(std::move(r));
       }
     }
   } else {
-    all = store_.RecentLedgers(uid, 500);
+    for (auto& e : store_.RecentLedgers(uid, 500)) all.push_back(Row{std::move(e), {}});
   }
   const int total = static_cast<int>(all.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
-    const auto& e = all[static_cast<size_t>(i)];
-    items.push_back({{"id", e.id},
-                     {"uid", e.uid},
-                     {"currency", e.currency},
-                     {"delta", e.delta},
-                     {"balance_after", e.balance_after},
-                     {"biz_type", e.biz_type},
-                     {"idempotent_key", e.idempotent_key}});
+    const auto& r = all[static_cast<size_t>(i)];
+    items.push_back({{"id", r.e.id},
+                     {"uid", r.e.uid},
+                     {"currency", r.e.currency},
+                     {"delta", r.e.delta},
+                     {"balance_after", r.e.balance_after},
+                     {"biz_type", r.e.biz_type},
+                     {"idempotent_key", r.e.idempotent_key},
+                     {"created_at", r.created_at}});
   }
   return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
@@ -409,17 +425,20 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
     std::string players_json;
     int base_score{0};
     int multiplier{0};
+    std::string started_at;
+    std::string ended_at;
   };
   std::vector<RoundRow> rounds;
   if (mysql_.Available()) {
     std::string sql =
-        "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier FROM game_round";
+        "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier,"
+        "DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(ended_at,'%Y-%m-%d %H:%i:%s') FROM game_round";
     if (uid > 0) sql += " WHERE CAST(players_json AS CHAR) LIKE '%" + std::to_string(uid) + "%'";
     sql += " ORDER BY round_id DESC LIMIT 200";
     auto rows = mysql_.Query(sql);
     if (rows) {
       for (const auto& row : *rows) {
-        if (row.cols.size() < 6) continue;
+        if (row.cols.size() < 8) continue;
         RoundRow m;
         try {
           m.round_id = std::stoll(row.cols[0]);
@@ -428,6 +447,8 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
           m.players_json = row.cols[3];
           m.base_score = std::stoi(row.cols[4]);
           m.multiplier = std::stoi(row.cols[5]);
+          m.started_at = row.cols[6];
+          m.ended_at = row.cols[7];
         } catch (...) {
           continue;
         }
@@ -437,6 +458,7 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
   }
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
+  if (page_size > 100) page_size = 100;
   const int total = static_cast<int>(rounds.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
@@ -447,7 +469,9 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
                      {"template_id", m.template_id},
                      {"players_json", ParseJsonOr(m.players_json, json::array())},
                      {"base_score", m.base_score},
-                     {"multiplier", m.multiplier}});
+                     {"multiplier", m.multiplier},
+                     {"started_at", m.started_at},
+                     {"ended_at", m.ended_at}});
   }
   return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
@@ -539,6 +563,10 @@ bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, 
 }
 
 bool AdminService::DeleteProduct(int id, const AdminSession& admin, std::string* err) {
+  return SetProductEnabled(id, false, admin, err);
+}
+
+bool AdminService::SetProductEnabled(int id, bool enabled, const AdminSession& admin, std::string* err) {
   if (!RequireRole(admin, AdminRole::kOps)) {
     if (err) *err = "forbidden";
     return false;
@@ -547,27 +575,45 @@ bool AdminService::DeleteProduct(int id, const AdminSession& admin, std::string*
     if (err) *err = "mysql unavailable";
     return false;
   }
-  mysql_.Exec("UPDATE pay_product SET enabled=0 WHERE id=" + std::to_string(id));
+  if (id <= 0) {
+    if (err) *err = "id required";
+    return false;
+  }
+  const int r = mysql_.Exec("UPDATE pay_product SET enabled=" + std::string(enabled ? "1" : "0") +
+                            " WHERE id=" + std::to_string(id));
+  if (r < 0) {
+    if (err) *err = mysql_.LastError();
+    return false;
+  }
   pay_.ReloadFromDb(mysql_);
-  Audit(admin.admin_id, "delete_product", std::to_string(id), "", "");
+  Audit(admin.admin_id, enabled ? "enable_product" : "disable_product", std::to_string(id), "", enabled ? "1" : "0");
   return true;
 }
 
-std::string AdminService::ListOrdersJson(int page, int page_size) const {
+std::string AdminService::ListOrdersJson(int64_t uid, int status, int page, int page_size) const {
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
+  if (page_size > 100) page_size = 100;
   auto orders = pay_.ListOrders(500);
-  const int total = static_cast<int>(orders.size());
+  std::vector<PayOrder> filtered;
+  filtered.reserve(orders.size());
+  for (const auto& o : orders) {
+    if (uid > 0 && o.uid != uid) continue;
+    if (status >= 0 && o.status != status) continue;
+    filtered.push_back(o);
+  }
+  const int total = static_cast<int>(filtered.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
   for (int i = start; i < total && i < start + page_size; ++i) {
-    const auto& o = orders[static_cast<size_t>(i)];
+    const auto& o = filtered[static_cast<size_t>(i)];
     items.push_back({{"order_id", o.order_id},
                      {"uid", o.uid},
                      {"product_id", o.product_id},
                      {"amount_fen", o.amount_fen},
                      {"diamond", o.diamond},
-                     {"status", o.status}});
+                     {"status", o.status},
+                     {"created_at", o.created_at}});
   }
   return json{{"total", total}, {"items", std::move(items)}}.dump();
 }
@@ -593,9 +639,10 @@ bool AdminService::SetMaintainOp(bool on, const AdminSession& admin, std::string
   return true;
 }
 
-std::string AdminService::ListAuditJson(int page, int page_size) const {
+std::string AdminService::ListAuditJson(const std::string& q, int page, int page_size) const {
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
+  if (page_size > 100) page_size = 100;
   struct AuditRow {
     int admin_id{0};
     std::string action;
@@ -606,10 +653,15 @@ std::string AdminService::ListAuditJson(int page, int page_size) const {
   };
   std::vector<AuditRow> audits;
   if (mysql_.Available()) {
-    auto rows = mysql_.Query(
+    std::string sql =
         "SELECT admin_id,action,target,CAST(before_json AS CHAR),CAST(after_json AS CHAR),"
         "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
-        "FROM admin_audit ORDER BY id DESC LIMIT 200");
+        "FROM admin_audit";
+    if (!q.empty()) {
+      sql += " WHERE action LIKE '%" + Escape(q) + "%' OR target LIKE '%" + Escape(q) + "%'";
+    }
+    sql += " ORDER BY id DESC LIMIT 200";
+    auto rows = mysql_.Query(sql);
     if (rows) {
       for (const auto& row : *rows) {
         if (row.cols.size() < 6) continue;

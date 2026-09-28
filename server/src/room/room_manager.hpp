@@ -36,6 +36,7 @@ namespace pandora {
 
 class AdminService;
 class ActivityService;
+class SocialService;
 
 class RoomManager;
 
@@ -147,6 +148,8 @@ class RoomManager {
   AdminService* Admin() { return admin_; }
   void SetActivity(ActivityService* activity) { activity_ = activity; }
   ActivityService* Activity() { return activity_; }
+  void SetSocial(SocialService* social) { social_ = social; }
+  SocialService* Social() { return social_; }
 
 
 
@@ -239,6 +242,7 @@ class RoomManager {
   WalletService& wallet_;
   AdminService* admin_{nullptr};
   ActivityService* activity_{nullptr};
+  SocialService* social_{nullptr};
   GameConfig cfg_;
 
   // Lock order when both needed: index_mu_ then shard.mu

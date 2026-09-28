@@ -11,6 +11,7 @@
 #include "common/errors.hpp"
 #include "common/log.hpp"
 #include "common/proto_wire.hpp"
+#include "social/social_service.hpp"
 #include "wallet/wallet_service.hpp"
 
 namespace pandora {
@@ -537,12 +538,20 @@ void DdzClassicSimple::DoSettle(bool landlord_win) {
   for (int64_t uid : AllUids()) rooms_.SendToUid(uid, MsgId::kS2C_DdzSettle, body);
   int tid = 1;
   if (auto* room = rooms_.FindRoomUnlocked(room_id_)) tid = room->template_id;
+  nlohmann::json players = nlohmann::json::array();
+  for (int i = 0; i < 3; ++i) {
+    players.push_back(
+        {{"uid", uids_[i]}, {"seat_id", i}, {"delta", deltas[i]}, {"is_landlord", i == landlord_}});
+  }
+  const std::string players_json = players.dump();
   if (rooms_.Admin()) {
-    nlohmann::json players = nlohmann::json::array();
-    for (int i = 0; i < 3; ++i) {
-      players.push_back({{"uid", uids_[i]}, {"delta", deltas[i]}});
+    rooms_.Admin()->RecordRound(round_id_, room_id_, tid, players_json, cfg_.base_score, mult);
+  }
+  if (rooms_.Social()) {
+    try {
+      rooms_.Social()->OnRoundSettled(round_id_, tid, players_json, cfg_.base_score, mult);
+    } catch (...) {
     }
-    rooms_.Admin()->RecordRound(round_id_, room_id_, tid, players.dump(), cfg_.base_score, mult);
   }
   if (rooms_.Activity()) {
     for (int64_t uid : AllUids()) {

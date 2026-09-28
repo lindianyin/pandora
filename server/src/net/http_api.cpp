@@ -100,6 +100,69 @@ int64_t PathUid(const std::string& path, const std::string& prefix) {
   }
 }
 
+std::string QueryParam(const std::string& query, const char* key) {
+  if (!key || !*key) return {};
+  const std::string prefix = std::string(key) + "=";
+  size_t pos = 0;
+  while (pos < query.size()) {
+    if (query.compare(pos, prefix.size(), prefix) == 0) {
+      const size_t start = pos + prefix.size();
+      const size_t amp = query.find('&', start);
+      std::string raw = amp == std::string::npos ? query.substr(start) : query.substr(start, amp - start);
+      // percent-decode (+ → space)
+      std::string out;
+      out.reserve(raw.size());
+      for (size_t i = 0; i < raw.size(); ++i) {
+        if (raw[i] == '+') {
+          out.push_back(' ');
+        } else if (raw[i] == '%' && i + 2 < raw.size()) {
+          auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+          };
+          const int hi = hex(raw[i + 1]);
+          const int lo = hex(raw[i + 2]);
+          if (hi >= 0 && lo >= 0) {
+            out.push_back(static_cast<char>((hi << 4) | lo));
+            i += 2;
+          } else {
+            out.push_back(raw[i]);
+          }
+        } else {
+          out.push_back(raw[i]);
+        }
+      }
+      return out;
+    }
+    const size_t amp = query.find('&', pos);
+    if (amp == std::string::npos) break;
+    pos = amp + 1;
+  }
+  return {};
+}
+
+int QueryInt(const std::string& query, const char* key, int def) {
+  const auto s = QueryParam(query, key);
+  if (s.empty()) return def;
+  try {
+    return std::stoi(s);
+  } catch (...) {
+    return def;
+  }
+}
+
+int64_t QueryI64(const std::string& query, const char* key, int64_t def) {
+  const auto s = QueryParam(query, key);
+  if (s.empty()) return def;
+  try {
+    return std::stoll(s);
+  } catch (...) {
+    return def;
+  }
+}
+
 struct HttpResult {
   int status{200};
   std::string content_type{"application/json; charset=utf-8"};
@@ -109,7 +172,8 @@ struct HttpResult {
 
 HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*store*/, AuthService& auth,
                     WalletService& wallet, PayService& pay, AdminService& admin, ActivityService& activity,
-                    MysqlClient& mysql, RedisClient& redis, SessionHub& hub, const AppConfig& cfg) {
+                    SocialService& social, MysqlClient& mysql, RedisClient& redis, SessionHub& hub,
+                    const AppConfig& cfg) {
   HttpResult out;
   const std::string method(req.method_string());
   std::string target(req.target());
@@ -269,6 +333,132 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
       if (!cr.ok) setJson(400, ErrObj(Err::kActivityCannotClaim, trace, cr.error));
       else setJson(200, OkObj({{"balance", cr.balance}, {"currency", cr.currency}}, trace));
     }
+  } else if (method == "GET" && path == "/api/v1/record/summary") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else setJson(200, OkObj(json::parse(social.SummaryJson(*uid), nullptr, false), trace));
+  } else if (method == "GET" && path == "/api/v1/record/recent") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      int page = 1;
+      int page_size = 20;
+      auto pp = query.find("page=");
+      if (pp != std::string::npos) {
+        try {
+          page = std::stoi(query.substr(pp + 5));
+        } catch (...) {
+        }
+      }
+      auto ps = query.find("page_size=");
+      if (ps != std::string::npos) {
+        try {
+          page_size = std::stoi(query.substr(ps + 10));
+        } catch (...) {
+        }
+      }
+      setJson(200, OkObj(json::parse(social.RecentJson(*uid, page, page_size), nullptr, false), trace));
+    }
+  } else if (method == "GET" && path == "/api/v1/friend/list") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      auto list = json::parse(social.FriendListJson(*uid), nullptr, false);
+      auto pending = json::parse(social.FriendPendingJson(*uid), nullptr, false);
+      list["pending"] = pending;
+      setJson(200, OkObj(list, trace));
+    }
+  } else if (method == "POST" && path == "/api/v1/friend/request") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.FriendRequest(*uid, JInt(body, "to_uid"), &err))
+        setJson(400, ErrObj(Err::kFriendIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "POST" && path == "/api/v1/friend/accept") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.FriendAccept(*uid, JInt(body, "from_uid"), &err))
+        setJson(400, ErrObj(Err::kFriendIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "POST" && path == "/api/v1/friend/reject") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.FriendReject(*uid, JInt(body, "from_uid"), &err))
+        setJson(400, ErrObj(Err::kFriendIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "POST" && path == "/api/v1/friend/remove") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.FriendRemove(*uid, JInt(body, "friend_uid"), &err))
+        setJson(400, ErrObj(Err::kFriendIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "GET" && path == "/api/v1/mail/list") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else setJson(200, OkObj(json::parse(social.MailListJson(*uid), nullptr, false), trace));
+  } else if (method == "POST" && path.rfind("/api/v1/mail/", 0) == 0 && path.find("/read") != std::string::npos) {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.MailRead(*uid, PathUid(path, "/api/v1/mail/"), &err))
+        setJson(400, ErrObj(Err::kMailIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "POST" && path.rfind("/api/v1/mail/", 0) == 0 && path.find("/claim") != std::string::npos) {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      auto cr = social.MailClaim(*uid, PathUid(path, "/api/v1/mail/"));
+      if (!cr.ok) setJson(400, ErrObj(Err::kMailIllegal, trace, cr.error));
+      else setJson(200, OkObj({{"balance", cr.balance}, {"currency", cr.currency}}, trace));
+    }
+  } else if (method == "POST" && path.rfind("/api/v1/mail/", 0) == 0 && path.find("/delete") != std::string::npos) {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string err;
+      if (!social.MailDelete(*uid, PathUid(path, "/api/v1/mail/"), &err))
+        setJson(400, ErrObj(Err::kMailIllegal, trace, err));
+      else
+        setJson(200, OkObj({{"ok", true}}, trace));
+    }
+  } else if (method == "GET" && path.rfind("/api/v1/rank/", 0) == 0) {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      const std::string period = path.substr(std::string("/api/v1/rank/").size());
+      if (period != "daily" && period != "weekly") {
+        setJson(400, ErrObj(Err::kRankIllegal, trace));
+      } else {
+        int limit = 50;
+        auto lp = query.find("limit=");
+        if (lp != std::string::npos) {
+          try {
+            limit = std::stoi(query.substr(lp + 6));
+          } catch (...) {
+          }
+        }
+        setJson(200, OkObj(json::parse(social.RankJson(*uid, period, limit), nullptr, false), trace));
+      }
+    }
   } else if (method == "POST" && path.rfind("/admin/v1/auth/login", 0) == 0) {
     auto r = admin.Login(JStr(body, "username"), JStr(body, "password"));
     if (!r.ok) setJson(401, ErrObj(Err::kUnauthorized, trace, r.error));
@@ -287,10 +477,11 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
       auto s = requireAdmin(AdminRole::kCs);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
       else {
-        std::string qq = JStr(body, "q");
-        auto qp = query.find("q=");
-        if (qp != std::string::npos) qq = query.substr(qp + 2);
-        setJson(200, OkObj(json::parse(admin.ListPlayersJson(qq, 1, 50), nullptr, false), trace));
+        std::string qq = QueryParam(query, "q");
+        if (qq.empty()) qq = JStr(body, "q");
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(admin.ListPlayersJson(qq, page, page_size), nullptr, false), trace));
       }
     } else if (method == "POST" && path.find("/admin/v1/players/") == 0 && path.find("/kick") != std::string::npos) {
       auto s = requireAdmin(AdminRole::kOps);
@@ -338,11 +529,21 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
     } else if (method == "GET" && path.rfind("/admin/v1/wallet/ledgers", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
-      else setJson(200, OkObj(json::parse(admin.ListLedgersJson(JInt(body, "uid"), 1, 50), nullptr, false), trace));
+      else {
+        const int64_t uid = QueryI64(query, "uid", JInt(body, "uid"));
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(admin.ListLedgersJson(uid, page, page_size), nullptr, false), trace));
+      }
     } else if (method == "GET" && path.rfind("/admin/v1/rounds", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
-      else setJson(200, OkObj(json::parse(admin.ListRoundsJson(JInt(body, "uid"), 1, 50), nullptr, false), trace));
+      else {
+        const int64_t uid = QueryI64(query, "uid", JInt(body, "uid"));
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(admin.ListRoundsJson(uid, page, page_size), nullptr, false), trace));
+      }
     } else if ((method == "GET" || method == "PUT") && path.rfind("/admin/v1/rooms/templates", 0) == 0) {
       if (method == "GET") {
         auto s = requireAdmin(AdminRole::kCs);
@@ -377,6 +578,19 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
         if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
         else setJson(200, OkObj({{"ok", true}}, trace));
       }
+    } else if (method == "POST" && path.rfind("/admin/v1/pay/products/", 0) == 0 &&
+               path.find("/enable") != std::string::npos) {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::string err;
+        const int id = static_cast<int>(PathUid(path, "/admin/v1/pay/products/"));
+        const bool enabled = JBool(body, "enabled", true);
+        if (!admin.SetProductEnabled(id, enabled, *s, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else
+          setJson(200, OkObj({{"ok", true}, {"enabled", enabled}}, trace));
+      }
     } else if (method == "DELETE" && path.rfind("/admin/v1/pay/products/", 0) == 0) {
       auto s = requireAdmin(AdminRole::kOps);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
@@ -390,7 +604,13 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
     } else if (method == "GET" && path.rfind("/admin/v1/pay/orders", 0) == 0) {
       auto s = requireAdmin(AdminRole::kCs);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
-      else setJson(200, OkObj(json::parse(admin.ListOrdersJson(1, 50), nullptr, false), trace));
+      else {
+        const int64_t uid = QueryI64(query, "uid", 0);
+        const int status = QueryInt(query, "status", -1);
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(admin.ListOrdersJson(uid, status, page, page_size), nullptr, false), trace));
+      }
     } else if (method == "POST" && path == "/admin/v1/announce") {
       auto s = requireAdmin(AdminRole::kOps);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
@@ -410,21 +630,34 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
     } else if (method == "GET" && path.rfind("/admin/v1/audit", 0) == 0) {
       auto s = requireAdmin(AdminRole::kSuper);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
-      else setJson(200, OkObj(json::parse(admin.ListAuditJson(1, 50), nullptr, false), trace));
+      else {
+        const std::string aq = QueryParam(query, "q");
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(admin.ListAuditJson(aq, page, page_size), nullptr, false), trace));
+      }
     } else if (method == "GET" && path == "/admin/v1/activities") {
       auto s = requireAdmin(AdminRole::kOps);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
       else {
+        const std::string aq = QueryParam(query, "q");
         json items = json::array();
         for (const auto& d : activity.ListDefs(true)) {
+          if (!aq.empty()) {
+            const bool hit = d.title.find(aq) != std::string::npos || d.type.find(aq) != std::string::npos ||
+                             std::to_string(d.id) == aq;
+            if (!hit) continue;
+          }
           items.push_back({{"id", d.id},
                            {"type", d.type},
                            {"title", d.title},
                            {"rules_json", json::parse(d.rules_json, nullptr, false)},
                            {"enabled", d.enabled},
+                           {"start_at", d.start_at},
+                           {"end_at", d.end_at},
                            {"claim_count", activity.ClaimCount(d.id)}});
         }
-        setJson(200, OkObj({{"items", items}}, trace));
+        setJson(200, OkObj({{"items", items}, {"total", items.size()}}, trace));
       }
     } else if ((method == "POST" || method == "PUT") && path == "/admin/v1/activities") {
       auto s = requireAdmin(AdminRole::kOps);
@@ -434,6 +667,8 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
         d.id = static_cast<int>(JInt(body, "id"));
         d.type = JStr(body, "type");
         d.title = JStr(body, "title");
+        d.start_at = JStr(body, "start_at");
+        d.end_at = JStr(body, "end_at");
         if (body.contains("rules_json")) {
           if (body["rules_json"].is_object() || body["rules_json"].is_array())
             d.rules_json = body["rules_json"].dump();
@@ -447,6 +682,21 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
         else {
           admin.Audit(s->admin_id, "upsert_activity", d.title, "", d.type);
           setJson(200, OkObj({{"ok", true}}, trace));
+        }
+      }
+    } else if (method == "POST" && path.rfind("/admin/v1/activities/", 0) == 0 &&
+               path.find("/enable") != std::string::npos) {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int id = static_cast<int>(PathUid(path, "/admin/v1/activities/"));
+        const bool enabled = JBool(body, "enabled", true);
+        std::string err;
+        if (!activity.SetEnabled(id, enabled, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
+          admin.Audit(s->admin_id, enabled ? "enable_activity" : "disable_activity", std::to_string(id), "",
+                      enabled ? "1" : "0");
+          setJson(200, OkObj({{"ok", true}, {"enabled", enabled}}, trace));
         }
       }
     } else if (method == "POST" && path == "/admin/v1/activities/simulate_settle") {
@@ -513,6 +763,89 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
           setJson(200, OkObj({{"ok", true}}, trace));
         }
       }
+    } else if (method == "POST" && path == "/admin/v1/mail/send") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::vector<int64_t> uids;
+        if (body.contains("uids") && body["uids"].is_array()) {
+          for (const auto& x : body["uids"]) {
+            if (x.is_number_integer()) uids.push_back(x.get<int64_t>());
+            else if (x.is_string()) {
+              try {
+                uids.push_back(std::stoll(x.get<std::string>()));
+              } catch (...) {
+              }
+            }
+          }
+        }
+        std::string attach = "{}";
+        if (body.contains("attach_json")) {
+          if (body["attach_json"].is_object() || body["attach_json"].is_array())
+            attach = body["attach_json"].dump();
+          else
+            attach = JStr(body, "attach_json", "{}");
+        }
+        std::string err;
+        if (!social.AdminSendMail(s->admin_id, JStr(body, "scope", "uids"), uids, JStr(body, "title"),
+                                  JStr(body, "body"), attach, &err))
+          setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
+          admin.Audit(s->admin_id, "mail_send", JStr(body, "title"), "", JStr(body, "scope", "uids"));
+          setJson(200, OkObj({{"ok", true}}, trace));
+        }
+      }
+    } else if (method == "GET" && path == "/admin/v1/mail") {
+      auto s = requireAdmin(AdminRole::kCs);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(social.AdminMailLogJson(page, page_size), nullptr, false), trace));
+      }
+    } else if (method == "GET" && path == "/admin/v1/rank/snapshot") {
+      auto s = requireAdmin(AdminRole::kCs);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::string period = "daily";
+        auto pp = query.find("period=");
+        if (pp != std::string::npos) period = query.substr(pp + 7);
+        auto qamp = period.find('&');
+        if (qamp != std::string::npos) period = period.substr(0, qamp);
+        setJson(200, OkObj(json::parse(social.AdminRankSnapshotJson(period, 1, 50), nullptr, false), trace));
+      }
+    } else if (method == "POST" && path == "/admin/v1/rank/snapshot") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const std::string period = JStr(body, "period", "daily");
+        std::string err;
+        if (!social.SnapshotRank(period, &err)) setJson(400, ErrObj(Err::kRankIllegal, trace, err));
+        else {
+          admin.Audit(s->admin_id, "rank_snapshot", period, "", "");
+          setJson(200, OkObj({{"ok", true}}, trace));
+        }
+      }
+    } else if (method == "POST" && path == "/admin/v1/social/simulate_round") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int64_t uid = JInt(body, "uid");
+        const int64_t delta = JInt(body, "delta", 100);
+        const int64_t round_id = JInt(body, "round_id", 0);
+        if (uid <= 0) setJson(400, ErrObj(Err::kBadParam, trace, "uid required"));
+        else {
+          const int64_t rid = round_id > 0 ? round_id
+                                           : (std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                  std::chrono::system_clock::now().time_since_epoch())
+                                                  .count());
+          json players = json::array();
+          players.push_back({{"uid", uid}, {"seat_id", 0}, {"delta", delta}, {"is_landlord", true}});
+          admin.RecordRound(rid, rid, 1, players.dump(), 100, 1);
+          social.OnRoundSettled(rid, 1, players.dump(), 100, 1);
+          setJson(200, OkObj({{"ok", true}, {"round_id", rid}}, trace));
+        }
+      }
     } else {
       setJson(404, ErrObj(Err::kNotFound, trace));
     }
@@ -524,7 +857,7 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
 
 HttpResult HandleRequest(HttpApi* api, const http::request<http::string_body>& req) {
   return Dispatch(req, api->store(), api->auth(), api->wallet(), api->pay(), api->admin(), api->activity(),
-                  api->mysql(), api->redis(), api->hub(), api->cfg());
+                  api->social(), api->mysql(), api->redis(), api->hub(), api->cfg());
 }
 
 std::shared_ptr<http::response<http::string_body>> MakeResponse(const http::request<http::string_body>& req,
@@ -648,8 +981,8 @@ class HttpListener : public std::enable_shared_from_this<HttpListener> {
 }  // namespace
 
 HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
-                 AdminService& admin, ActivityService& activity, MysqlClient& mysql, RedisClient& redis,
-                 SessionHub& hub)
+                 AdminService& admin, ActivityService& activity, SocialService& social, MysqlClient& mysql,
+                 RedisClient& redis, SessionHub& hub)
     : cfg_(std::move(cfg)),
       store_(store),
       auth_(auth),
@@ -657,6 +990,7 @@ HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletSer
       pay_(pay),
       admin_(admin),
       activity_(activity),
+      social_(social),
       mysql_(mysql),
       redis_(redis),
       hub_(hub) {}

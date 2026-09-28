@@ -22,6 +22,7 @@
 #include "net/http_api.hpp"
 #include "net/ws_server.hpp"
 #include "pay/pay_service.hpp"
+#include "social/social_service.hpp"
 #include "store/memory_store.hpp"
 #include "store/mysql_client.hpp"
 #include "store/redis_client.hpp"
@@ -68,10 +69,14 @@ int main(int argc, char** argv) {
   GameRuntime runtime(store, wallet, cfg.game);
   AdminService admin(mysql, redis, store, wallet, pay, runtime.lobby, runtime.hub, persist);
   ActivityService activity(mysql, redis, wallet, runtime.hub, persist);
+  SocialService social(mysql, redis, wallet, runtime.hub, persist, cfg.social);
+  wallet.SetOnGoldChanged([&social](int64_t uid, int64_t gold) { social.OnGoldChanged(uid, gold); });
   runtime.rooms.SetAdmin(&admin);
   runtime.rooms.SetActivity(&activity);
+  runtime.rooms.SetSocial(&social);
   admin.Bootstrap();
   activity.Bootstrap();
+  social.Bootstrap();
 
   // Isolate HTTP (slow / admin / pay) from WSS (game hot path).
   const int ws_workers = (std::max)(1, cfg.net.iocp_workers);
@@ -79,7 +84,7 @@ int main(int argc, char** argv) {
   boost::asio::io_context http_ioc{http_workers};
   boost::asio::io_context ws_ioc{ws_workers};
 
-  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, mysql, redis, runtime.hub);
+  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, social, mysql, redis, runtime.hub);
   WsServer ws(cfg, auth, runtime, &admin);
   http.Start(http_ioc, conf_dir);
   ws.Start(ws_ioc, conf_dir);

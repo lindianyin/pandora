@@ -13,6 +13,9 @@ enum class Err : int32_t {
   kNotFound = 1004,
   kInsufficient = 2001,
   kActivityCannotClaim = 2003,
+  kFriendIllegal = 2101,
+  kMailIllegal = 2102,
+  kRankIllegal = 2103,
   kMaintain = 5000,
   kBanned = 5001,
   kInternal = 9999,
@@ -34,6 +37,12 @@ inline const char* ErrMessage(Err e) {
       return "insufficient balance";
     case Err::kActivityCannotClaim:
       return "activity cannot claim";
+    case Err::kFriendIllegal:
+      return "friend request illegal";
+    case Err::kMailIllegal:
+      return "mail missing or claimed";
+    case Err::kRankIllegal:
+      return "rank period illegal";
     case Err::kMaintain:
       return "maintain";
     case Err::kBanned:
@@ -74,6 +83,9 @@ constexpr uint32_t kS2C_DdzSettle = 2007;
 constexpr uint32_t kS2C_DdzReconnect = 2008;
 
 constexpr uint32_t kS2C_ActivityUpdate = 3001;
+
+constexpr uint32_t kS2C_MailNotify = 4001;
+constexpr uint32_t kS2C_FriendNotify = 4002;
 }  // namespace MsgId
 
 }  // namespace pandora

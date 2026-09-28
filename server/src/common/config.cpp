@@ -73,6 +73,14 @@ AppConfig LoadConfig(const std::string& path) {
   cfg.worker.biz_threads = worker.value("biz_threads", cfg.worker.biz_threads);
   cfg.worker.async_threads = worker.value("async_threads", cfg.worker.async_threads);
 
+  const auto social = root.value("social", nlohmann::json::object());
+  cfg.social.friend_max = social.value("friend_max", cfg.social.friend_max);
+  cfg.social.friend_request_ttl_days = social.value("friend_request_ttl_days", cfg.social.friend_request_ttl_days);
+  cfg.social.mail_expire_days = social.value("mail_expire_days", cfg.social.mail_expire_days);
+  cfg.social.mail_broadcast_batch = social.value("mail_broadcast_batch", cfg.social.mail_broadcast_batch);
+  cfg.social.rank_top_n = social.value("rank_top_n", cfg.social.rank_top_n);
+  cfg.social.rank_score_mode = social.value("rank_score_mode", cfg.social.rank_score_mode);
+
   if (cfg.store_backend == "mysql") {
     PLOG_WARN("store.backend=mysql selected; ledger uses MemoryStore over MySQL/Redis drivers");
     cfg.store_backend = "memory";

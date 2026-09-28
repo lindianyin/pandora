@@ -70,5 +70,8 @@ std::vector<uint8_t> EncodeS2C_DdzReconnect(int32_t seat_id, const std::string& 
 std::vector<uint8_t> EncodeS2C_ActivityUpdate(int32_t activity_id, const std::string& type,
                                               const std::string& progress_json, bool claimable);
 
+std::vector<uint8_t> EncodeS2C_MailNotify(int64_t mail_id, const std::string& title, bool has_attach);
+std::vector<uint8_t> EncodeS2C_FriendNotify(int32_t kind, int64_t from_uid, const std::string& nickname);
+
 }  // namespace proto_wire
 }  // namespace pandora

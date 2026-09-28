@@ -60,6 +60,15 @@ struct WorkerConfig {
   int async_threads{2};   // persist / ledger workers
 };
 
+struct SocialConfig {
+  int friend_max{100};
+  int friend_request_ttl_days{7};
+  int mail_expire_days{30};
+  int mail_broadcast_batch{500};
+  int rank_top_n{100};
+  std::string rank_score_mode{"gold"};  // gold | net_win (net_win 二期)
+};
+
 struct AppConfig {
   NetConfig net;
   GameConfig game;
@@ -68,6 +77,7 @@ struct AppConfig {
   MysqlConfig mysql;
   RedisConfig redis;
   WorkerConfig worker;
+  SocialConfig social;
   std::string store_backend{"memory"};  // memory | mysql (mysql driver optional; falls back)
 };
 
