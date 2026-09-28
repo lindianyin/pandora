@@ -350,7 +350,7 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | uid | BIGINT PK | 用户 ID |
 | account_type | TINYINT | 1 guest 2 phone … |
 | open_id | VARCHAR(128) | 外部/设备标识，UNIQUE(account_type, open_id) |
-| phone | VARCHAR(32) NULL | |
+| phone | VARCHAR(32) NOT NULL DEFAULT '' | 空串=未绑定 |
 | status | TINYINT | 0 正常 1 封禁 |
 | created_at / updated_at | DATETIME(3) | |
 
@@ -402,11 +402,11 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | players_json | JSON | uid/seat/结果 |
 | base_score | INT | |
 | multiplier | INT | |
-| started_at / ended_at | DATETIME(3) | |
+| started_at / ended_at | DATETIME(3) NOT NULL | 结算写入时双端同设 |
 
 #### `activity_define` / `activity_progress` / `activity_claim`
 
-- `activity_define`：type(`sign`/`task`/`gift`)、规则 JSON、时间窗、enabled  
+- `activity_define`：type(`sign`/`task`/`gift`)、规则 JSON、时间窗（`start_at`/`end_at` NOT NULL；哨兵 `1970-01-01` / `9999-12-31` 表示无窗）、enabled  
 - `activity_progress`：PK(`activity_id`,`uid`)，progress JSON，updated_at  
 - `activity_claim`：UNIQUE(`activity_id`,`uid`,`reward_key`)
 
@@ -430,16 +430,18 @@ Adjust(uid, currency, delta, biz_type, idempotent_key, remark) -> Result
 | product_id | INT | |
 | amount_fen | INT | |
 | status | TINYINT | 0 待支付 1 成功 2 失败 3 关闭 |
-| alipay_trade_no | VARCHAR(64) | |
+| alipay_trade_no | VARCHAR(64) NOT NULL DEFAULT '' | |
 | idempotent_paid | TINYINT | 到账标记 |
-| created_at / paid_at | DATETIME(3) | |
+| created_at | DATETIME(3) NOT NULL | |
+| paid_at | DATETIME(3) NOT NULL | 哨兵 `1970-01-01`=未支付 |
 
 状态机：`0 → 1`（回调成功且验签）或 `0 → 2/3`；**仅 0→1 触发加钻一次**。
 
 #### `admin_user` / `admin_role` / `admin_audit`
 
-标准 RBAC + 审计（who/when/action/target/before/after/ip）。
+标准 RBAC + 审计（who/when/action/target/before/after/ip）。`before_json`/`after_json` 为 JSON NOT NULL（空用 `{}`）。
 
+> 约定：表结构**不使用可空列**；“无值”用空串或上述哨兵时间/空 JSON 表示。迁移见 `server/sql/migrate_drop_nulls.sql`。
 ### 6.2 Redis Key
 
 | Key | 类型 | TTL | 说明 |

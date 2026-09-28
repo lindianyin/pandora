@@ -148,8 +148,8 @@ void ActivityService::Reload() {
     return;
   }
   auto rows = mysql_.Query(
-      "SELECT id,type,title,CAST(rules_json AS CHAR),IFNULL(start_at,''),IFNULL(end_at,''),enabled FROM "
-      "activity_define ORDER BY id");
+      "SELECT id,type,title,CAST(rules_json AS CHAR),DATE_FORMAT(start_at,'%Y-%m-%d %H:%i:%s.%f'),"
+      "DATE_FORMAT(end_at,'%Y-%m-%d %H:%i:%s.%f'),enabled FROM activity_define ORDER BY id");
   if (rows) {
     for (const auto& row : *rows) {
       if (row.cols.size() < 7) continue;
@@ -160,6 +160,9 @@ void ActivityService::Reload() {
       d.rules_json = row.cols[3];
       d.start_at = row.cols[4];
       d.end_at = row.cols[5];
+      // 哨兵时间对外视为空窗
+      if (d.start_at.rfind("1970-01-01", 0) == 0) d.start_at.clear();
+      if (d.end_at.rfind("9999-12-31", 0) == 0) d.end_at.clear();
       d.enabled = row.cols[6] == "1";
       loaded.push_back(d);
     }
@@ -194,18 +197,24 @@ bool ActivityService::UpsertDef(const ActivityDef& def, std::string* err) {
     return false;
   }
   if (def.id <= 0) {
-    const int r = mysql_.ExecBind("INSERT INTO activity_define(type,title,rules_json,enabled) VALUES(?,?,?,?)",
-                                  {Str(def.type), Str(def.title), Str(def.rules_json), I64(def.enabled ? 1 : 0)});
+    const std::string start = def.start_at.empty() ? "1970-01-01 00:00:00.000" : def.start_at;
+    const std::string end = def.end_at.empty() ? "9999-12-31 23:59:59.999" : def.end_at;
+    const int r = mysql_.ExecBind(
+        "INSERT INTO activity_define(type,title,rules_json,start_at,end_at,enabled) VALUES(?,?,?,?,?,?)",
+        {Str(def.type), Str(def.title), Str(def.rules_json), Str(start), Str(end), I64(def.enabled ? 1 : 0)});
     if (r < 0) {
       if (err) *err = mysql_.LastError();
       return false;
     }
   } else {
+    const std::string start = def.start_at.empty() ? "1970-01-01 00:00:00.000" : def.start_at;
+    const std::string end = def.end_at.empty() ? "9999-12-31 23:59:59.999" : def.end_at;
     const int r = mysql_.ExecBind(
-        "INSERT INTO activity_define(id,type,title,rules_json,enabled) VALUES(?,?,?,?,?) "
+        "INSERT INTO activity_define(id,type,title,rules_json,start_at,end_at,enabled) VALUES(?,?,?,?,?,?,?) "
         "ON DUPLICATE KEY UPDATE type=VALUES(type),title=VALUES(title),"
-        "rules_json=VALUES(rules_json),enabled=VALUES(enabled)",
-        {I64(def.id), Str(def.type), Str(def.title), Str(def.rules_json), I64(def.enabled ? 1 : 0)});
+        "rules_json=VALUES(rules_json),start_at=VALUES(start_at),end_at=VALUES(end_at),enabled=VALUES(enabled)",
+        {I64(def.id), Str(def.type), Str(def.title), Str(def.rules_json), Str(start), Str(end),
+         I64(def.enabled ? 1 : 0)});
     if (r < 0) {
       if (err) *err = mysql_.LastError();
       return false;

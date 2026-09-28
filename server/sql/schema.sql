@@ -1,5 +1,5 @@
 -- Pandora M1 schema (MySQL 8+, utf8mb4)
--- Based on SPEC §6.1
+-- Based on SPEC §6.1 — 所有业务列均为 NOT NULL（无值用空串/哨兵时间）
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS `user` (
   `uid` BIGINT NOT NULL AUTO_INCREMENT,
   `account_type` TINYINT NOT NULL DEFAULT 1 COMMENT '1=guest 2=phone',
   `open_id` VARCHAR(128) NOT NULL,
-  `phone` VARCHAR(32) NULL,
+  `phone` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '空串表示未绑定',
   `status` TINYINT NOT NULL DEFAULT 0 COMMENT '0=ok 1=banned',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS `game_round` (
   `players_json` JSON NOT NULL,
   `base_score` INT NOT NULL,
   `multiplier` INT NOT NULL DEFAULT 1,
-  `started_at` DATETIME(3) NOT NULL,
-  `ended_at` DATETIME(3) NULL,
+  `started_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `ended_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`round_id`),
   KEY `idx_room` (`room_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -72,8 +72,8 @@ CREATE TABLE IF NOT EXISTS `activity_define` (
   `type` VARCHAR(16) NOT NULL COMMENT 'sign/task/gift',
   `title` VARCHAR(128) NOT NULL,
   `rules_json` JSON NOT NULL,
-  `start_at` DATETIME(3) NULL,
-  `end_at` DATETIME(3) NULL,
+  `start_at` DATETIME(3) NOT NULL DEFAULT '1970-01-01 00:00:00.000' COMMENT '哨兵=无开始限制',
+  `end_at` DATETIME(3) NOT NULL DEFAULT '9999-12-31 23:59:59.999' COMMENT '哨兵=无结束限制',
   `enabled` TINYINT NOT NULL DEFAULT 1,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS `pay_order` (
   `alipay_trade_no` VARCHAR(64) NOT NULL DEFAULT '',
   `idempotent_paid` TINYINT NOT NULL DEFAULT 0,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-  `paid_at` DATETIME(3) NULL,
+  `paid_at` DATETIME(3) NOT NULL DEFAULT '1970-01-01 00:00:00.000' COMMENT '哨兵=未支付',
   PRIMARY KEY (`order_id`),
   KEY `idx_uid` (`uid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -142,8 +142,8 @@ CREATE TABLE IF NOT EXISTS `admin_audit` (
   `admin_id` INT NOT NULL,
   `action` VARCHAR(64) NOT NULL,
   `target` VARCHAR(128) NOT NULL DEFAULT '',
-  `before_json` JSON NULL,
-  `after_json` JSON NULL,
+  `before_json` JSON NOT NULL,
+  `after_json` JSON NOT NULL,
   `ip` VARCHAR(64) NOT NULL DEFAULT '',
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),

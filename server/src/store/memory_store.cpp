@@ -81,8 +81,8 @@ void MemoryStore::PersistAdjust(PlayerRecord snap, LedgerEntry e) {
 std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByOpenId(const std::string& open_id) {
   if (!mysql_.Available() || open_id.empty()) return std::nullopt;
   auto rows = mysql_.QueryBind(
-      "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,10000),IFNULL(p.diamond,0) "
-      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.account_type=1 AND u.open_id=? LIMIT 1",
+      "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
+      "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid WHERE u.account_type=1 AND u.open_id=? LIMIT 1",
       {Str(open_id)});
   if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
   const auto& c = rows->front().cols;
@@ -103,8 +103,8 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByOpenId(const std::string
 std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
   if (!mysql_.Available() || uid <= 0) return std::nullopt;
   auto rows = mysql_.QueryBind(
-      "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,10000),IFNULL(p.diamond,0) "
-      "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid WHERE u.uid=? LIMIT 1",
+      "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
+      "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid WHERE u.uid=? LIMIT 1",
       {I64(uid)});
   if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
   const auto& c = rows->front().cols;
@@ -124,7 +124,7 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
 
 bool MemoryStore::InsertMysqlUser(PlayerRecord& p) {
   if (!mysql_.Available()) return false;
-  const int r = mysql_.ExecBind("INSERT INTO `user`(account_type,open_id,status) VALUES(1,?,?)",
+  const int r = mysql_.ExecBind("INSERT INTO `user`(account_type,open_id,phone,status) VALUES(1,?,'',?)",
                                 {Str(p.open_id), I64(p.status)});
   if (r < 0) {
     auto exist = LoadFromMysqlByOpenId(p.open_id);
@@ -314,8 +314,8 @@ void MemoryStore::SetStatus(int64_t uid, int status) {
 std::vector<PlayerRecord> MemoryStore::ListPlayers(size_t limit) {
   if (mysql_.Available()) {
     auto rows = mysql_.QueryBind(
-        "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,0),IFNULL(p.diamond,0) "
-        "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid ORDER BY u.uid DESC LIMIT ?",
+        "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
+        "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid ORDER BY u.uid DESC LIMIT ?",
         {I64(static_cast<int64_t>(limit))});
     std::vector<PlayerRecord> out;
     if (rows) {
@@ -398,12 +398,12 @@ std::vector<LedgerEntry> MemoryStore::RecentLedgers(int64_t uid, size_t limit) {
     std::optional<std::vector<MysqlRow>> rows;
     if (uid > 0) {
       rows = mysql_.QueryBind(
-          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger "
+          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger "
           "WHERE uid=? ORDER BY id DESC LIMIT ?",
           {I64(uid), I64(static_cast<int64_t>(limit))});
     } else {
       rows = mysql_.QueryBind(
-          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger "
+          "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger "
           "ORDER BY id DESC LIMIT ?",
           {I64(static_cast<int64_t>(limit))});
     }

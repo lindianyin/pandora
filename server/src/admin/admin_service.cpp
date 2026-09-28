@@ -206,7 +206,7 @@ void AdminService::Audit(int admin_id, const std::string& action, const std::str
     return;
   }
   auto to_json_col = [](const std::string& s) -> std::string {
-    if (s.empty()) return "null";
+    if (s.empty()) return "{}";
     if ((s.front() == '{' && s.back() == '}') || (s.front() == '[' && s.back() == ']')) return s;
     std::string o = "\"";
     for (char c : s) {
@@ -267,10 +267,10 @@ std::string AdminService::ListPlayersJson(const std::string& q, int page, int pa
   std::vector<PlayerRecord> filtered;
   if (mysql_.Available()) {
     std::string sql =
-        "SELECT u.uid,u.open_id,u.status,IFNULL(p.nickname,''),IFNULL(p.gold,0),IFNULL(p.diamond,0) "
-        "FROM `user` u LEFT JOIN player_profile p ON p.uid=u.uid";
+        "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
+        "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid";
     if (!q.empty()) {
-      sql += " WHERE CAST(u.uid AS CHAR) LIKE '%" + Escape(q) + "%' OR IFNULL(p.nickname,'') LIKE '%" + Escape(q) +
+      sql += " WHERE CAST(u.uid AS CHAR) LIKE '%" + Escape(q) + "%' OR p.nickname LIKE '%" + Escape(q) +
              "%' OR u.open_id LIKE '%" + Escape(q) + "%'";
     }
     sql += " ORDER BY u.uid DESC LIMIT 500";
@@ -359,7 +359,7 @@ std::string AdminService::ListLedgersJson(int64_t uid, int page, int page_size) 
   std::vector<LedgerEntry> all;
   if (mysql_.Available()) {
     std::string sql =
-        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger";
+        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger";
     if (uid > 0) sql += " WHERE uid=" + std::to_string(uid);
     sql += " ORDER BY id DESC LIMIT 500";
     auto rows = mysql_.Query(sql);
@@ -607,8 +607,8 @@ std::string AdminService::ListAuditJson(int page, int page_size) const {
   std::vector<AuditRow> audits;
   if (mysql_.Available()) {
     auto rows = mysql_.Query(
-        "SELECT admin_id,action,target,IFNULL(CAST(before_json AS CHAR),''),IFNULL(CAST(after_json AS "
-        "CHAR),''),DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
+        "SELECT admin_id,action,target,CAST(before_json AS CHAR),CAST(after_json AS CHAR),"
+        "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
         "FROM admin_audit ORDER BY id DESC LIMIT 200");
     if (rows) {
       for (const auto& row : *rows) {
@@ -648,7 +648,7 @@ std::string AdminService::ExportLedgersCsv(int limit) const {
   oss << "id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id\n";
   if (!mysql_.Available()) return oss.str();
   auto rows = mysql_.Query(
-      "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,IFNULL(ref_id,'') FROM ledger ORDER BY id "
+      "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger ORDER BY id "
       "DESC LIMIT " +
       std::to_string(limit));
   if (!rows) return oss.str();

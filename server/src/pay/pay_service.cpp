@@ -68,7 +68,7 @@ void PayService::UpsertProduct(int id, int amount_fen, int diamond, int gift, bo
 std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
   if (!mysql_.Available()) return std::nullopt;
   auto rows = mysql_.QueryBind(
-      "SELECT order_id,uid,product_id,amount_fen,status,IFNULL(alipay_trade_no,''),"
+      "SELECT order_id,uid,product_id,amount_fen,status,alipay_trade_no,"
       "(SELECT diamond+gift_diamond FROM pay_product WHERE id=pay_order.product_id LIMIT 1) "
       "FROM pay_order WHERE order_id=? LIMIT 1",
       {Str(order_id)});
@@ -109,9 +109,9 @@ std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
   std::vector<PayOrder> out;
   if (!mysql_.Available()) return out;
   auto rows = mysql_.QueryBind(
-      "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,IFNULL(o.alipay_trade_no,''),"
-      "IFNULL(p.diamond,0)+IFNULL(p.gift_diamond,0) FROM pay_order o "
-      "LEFT JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
+      "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,o.alipay_trade_no,"
+      "p.diamond+p.gift_diamond FROM pay_order o "
+      "INNER JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
       {I64(static_cast<int64_t>(limit))});
   if (!rows) return out;
   for (const auto& row : *rows) {
@@ -159,8 +159,8 @@ std::optional<PayOrder> PayService::CreateOrder(int64_t uid, int product_id) {
   o.status = 0;
   if (mysql_.Available()) {
     const int r = mysql_.ExecBind(
-        "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid) "
-        "VALUES(?,?,?,?,0,'',0)",
+        "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid,paid_at) "
+        "VALUES(?,?,?,?,0,'',0,'1970-01-01 00:00:00.000')",
         {Str(o.order_id), I64(uid), I64(prod.id), I64(prod.amount_fen)});
     if (r < 0) {
       PLOG_WARN("CreateOrder mysql fail: " << mysql_.LastError());
