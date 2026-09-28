@@ -17,6 +17,7 @@ const menus = [
   { path: '/ops', title: '运维' },
   { path: '/audit', title: '审计' },
   { path: '/activities', title: '活动' },
+  { path: '/items', title: '道具' },
   { path: '/reports', title: '报表' },
 ]
 

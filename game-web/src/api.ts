@@ -56,6 +56,7 @@ export type PayProduct = {
   amount_fen: number
   diamond: number
   gift_diamond: number
+  gift_items?: Array<{ item_id: number; quantity: number; expire_sec?: number }>
 }
 
 export async function fetchPayProducts(token: string) {
@@ -199,7 +200,11 @@ export type MailItem = {
   id: number
   title: string
   body: string
-  attach_json: { currency?: number; amount?: number }
+  attach_json: {
+    currency?: number
+    amount?: number
+    items?: Array<{ item_id: number; quantity: number; expire_sec?: number }>
+  }
   status: number
   expire_at: string
   created_at: string
@@ -246,5 +251,33 @@ export async function fetchRank(token: string, period: 'daily' | 'weekly', limit
     list: RankEntry[]
     me: { rank: number; score: number }
   }>
+}
+
+export type BagItem = {
+  item_id: number
+  name: string
+  kind: string
+  quantity: number
+  expire_at: string
+  icon?: string
+  tag?: string
+}
+
+export async function fetchBag(token: string, includeExpired = false) {
+  const q = includeExpired ? '?include_expired=1' : ''
+  const res = await fetch(`${API_BASE}/api/v1/bag/list${q}`, { headers: authHeaders(token) })
+  return (await res.json()) as ApiResult<{ items: BagItem[] }>
+}
+
+export async function useBagItem(
+  token: string,
+  body: { item_id: number; quantity: number; expire_at?: string; idempotent_key: string },
+) {
+  const res = await fetch(`${API_BASE}/api/v1/bag/use`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify(body),
+  })
+  return (await res.json()) as ApiResult<{ ok: boolean; quantity_after: number }>
 }
 

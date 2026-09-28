@@ -66,18 +66,46 @@ onMounted(load)
 </script>
 <template>
   <h2>玩家</h2>
-  <el-space wrap style="margin-bottom: 12px">
-    <el-input v-model="q" clearable placeholder="UID / 昵称 / open_id" style="width: 220px" @keyup.enter="search" />
-    <el-button type="primary" @click="search">查找</el-button>
-    <el-input-number v-model="uid" placeholder="UID" />
-    <el-select v-model="currency" style="width: 120px">
-      <el-option :value="1" label="金币" />
-      <el-option :value="2" label="钻石" />
-    </el-select>
-    <el-input-number v-model="delta" />
-    <el-button type="warning" @click="adjust">补发/扣除</el-button>
-    <el-button @click="load">刷新</el-button>
-  </el-space>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>关键词</label>
+      <el-input
+        v-model="q"
+        clearable
+        class="admin-filter-control"
+        placeholder="UID / 昵称 / open_id"
+        @keyup.enter="search"
+      />
+      <span class="admin-filter-tip">支持 UID、昵称或 open_id 模糊查找</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="primary" @click="search">查询</el-button>
+      <el-button @click="q = ''; search()">清空</el-button>
+      <el-button @click="load">刷新</el-button>
+    </div>
+  </div>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>补发 UID</label>
+      <el-input-number v-model="uid" :min="1" controls-position="right" placeholder="玩家 UID" />
+      <span class="admin-filter-tip">要补发或扣币的玩家</span>
+    </div>
+    <div class="admin-filter-field">
+      <label>币种</label>
+      <el-select v-model="currency">
+        <el-option :value="1" label="金币" />
+        <el-option :value="2" label="钻石" />
+      </el-select>
+    </div>
+    <div class="admin-filter-field">
+      <label>变动数量</label>
+      <el-input-number v-model="delta" controls-position="right" />
+      <span class="admin-filter-tip">正数补发，负数扣除</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="warning" @click="adjust">补发/扣除</el-button>
+    </div>
+  </div>
   <el-table :data="items" border>
     <el-table-column prop="uid" label="UID" width="100" />
     <el-table-column prop="nickname" label="昵称" />

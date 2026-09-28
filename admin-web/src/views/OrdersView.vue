@@ -37,17 +37,27 @@ onMounted(load)
 </script>
 <template>
   <h2>支付订单</h2>
-  <el-space style="margin-bottom: 12px">
-    <el-input-number v-model="uid" :min="0" placeholder="UID" controls-position="right" />
-    <el-select v-model="status" clearable placeholder="状态" style="width: 120px">
-      <el-option :value="0" label="待支付" />
-      <el-option :value="1" label="成功" />
-      <el-option :value="2" label="失败" />
-      <el-option :value="3" label="关闭" />
-    </el-select>
-    <el-button type="primary" @click="search">查找</el-button>
-    <el-button @click="uid = undefined; status = undefined; search()">清空</el-button>
-  </el-space>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>玩家 UID</label>
+      <el-input-number v-model="uid" :min="0" controls-position="right" placeholder="0 表示不限" />
+      <span class="admin-filter-tip">留空或 0 表示不限玩家</span>
+    </div>
+    <div class="admin-filter-field">
+      <label>订单状态</label>
+      <el-select v-model="status" clearable placeholder="全部状态">
+        <el-option :value="0" label="待支付" />
+        <el-option :value="1" label="成功" />
+        <el-option :value="2" label="失败" />
+        <el-option :value="3" label="关闭" />
+      </el-select>
+      <span class="admin-filter-tip">可清空表示全部状态</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="primary" @click="search">查询</el-button>
+      <el-button @click="uid = undefined; status = undefined; search()">清空条件</el-button>
+    </div>
+  </div>
   <el-table :data="items" border>
     <el-table-column prop="order_id" label="订单号" min-width="160" />
     <el-table-column prop="uid" label="UID" width="100" />

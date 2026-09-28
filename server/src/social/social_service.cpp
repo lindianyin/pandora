@@ -36,9 +36,9 @@ int ParseInt(const std::string& s, int def = 0) {
 
 }  // namespace
 
-SocialService::SocialService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub,
-                             AsyncWorker& persist, SocialConfig cfg)
-    : mysql_(mysql), redis_(redis), wallet_(wallet), hub_(hub), persist_(persist), cfg_(std::move(cfg)) {}
+SocialService::SocialService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, BagService& bag,
+                             SessionHub& hub, AsyncWorker& persist, SocialConfig cfg)
+    : mysql_(mysql), redis_(redis), wallet_(wallet), bag_(bag), hub_(hub), persist_(persist), cfg_(std::move(cfg)) {}
 
 void SocialService::Bootstrap() {
   PLOG_INFO("social bootstrap friend_max=" << cfg_.friend_max << " rank_mode=" << cfg_.rank_score_mode);
@@ -498,16 +498,18 @@ SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
 
   int currency = 1;
   int64_t amount = 0;
+  json items = json::array();
   try {
     const auto attach = json::parse(rows->front().cols[0], nullptr, false);
     if (attach.is_object()) {
       currency = attach.value("currency", 1);
       amount = attach.value("amount", static_cast<int64_t>(0));
+      if (attach.contains("items") && attach["items"].is_array()) items = attach["items"];
     }
   } catch (...) {
   }
-  if (amount <= 0) {
-    // no attach: mark claimed
+  const std::string idem = "mail:" + std::to_string(mail_id) + ":" + std::to_string(uid);
+  if (amount <= 0 && items.empty()) {
     mysql_.ExecBind("UPDATE mail SET status=2 WHERE id=? AND to_uid=?", {I64(mail_id), I64(uid)});
     r.ok = true;
     auto p = wallet_.Profile(uid);
@@ -516,17 +518,29 @@ SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
     return r;
   }
 
-  const std::string idem = "mail:" + std::to_string(mail_id) + ":" + std::to_string(uid);
-  auto adj = wallet_.Adjust(uid, currency == 2 ? Currency::kDiamond : Currency::kGold, amount, "mail_reward", idem,
-                            std::to_string(mail_id));
-  if (!adj.ok) {
-    r.error = adj.error.empty() ? "wallet adjust failed" : adj.error;
-    return r;
+  if (amount > 0) {
+    auto adj = wallet_.Adjust(uid, currency == 2 ? Currency::kDiamond : Currency::kGold, amount, "mail_reward", idem,
+                              std::to_string(mail_id));
+    if (!adj.ok) {
+      r.error = adj.error.empty() ? "wallet adjust failed" : adj.error;
+      return r;
+    }
+    r.balance = adj.balance;
+    r.currency = currency;
+  } else {
+    auto p = wallet_.Profile(uid);
+    r.balance = p ? (currency == 2 ? p->diamond : p->gold) : 0;
+    r.currency = currency;
+  }
+  if (!items.empty()) {
+    std::string ierr;
+    if (!bag_.GrantItemsFromJson(uid, items.dump(), idem, "mail_reward", std::to_string(mail_id), &ierr)) {
+      r.error = ierr.empty() ? "bag grant failed" : ierr;
+      return r;
+    }
   }
   mysql_.ExecBind("UPDATE mail SET status=2 WHERE id=? AND to_uid=?", {I64(mail_id), I64(uid)});
   r.ok = true;
-  r.balance = adj.balance;
-  r.currency = currency;
   return r;
 }
 

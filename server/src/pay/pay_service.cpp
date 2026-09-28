@@ -3,16 +3,33 @@
 #include <chrono>
 #include <sstream>
 
+#include <nlohmann/json.hpp>
+
 #include "common/log.hpp"
 
 namespace pandora {
+namespace {
 
-PayService::PayService(WalletService& wallet, MysqlClient& mysql, AlipayConfig cfg)
-    : wallet_(wallet), mysql_(mysql), cfg_(std::move(cfg)) {
+using json = nlohmann::json;
+
+std::string NormalizeGiftItems(const std::string& raw) {
+  if (raw.empty()) return "[]";
+  try {
+    auto j = json::parse(raw, nullptr, false);
+    if (j.is_array()) return j.dump();
+  } catch (...) {
+  }
+  return "[]";
+}
+
+}  // namespace
+
+PayService::PayService(WalletService& wallet, MysqlClient& mysql, BagService& bag, AlipayConfig cfg)
+    : wallet_(wallet), mysql_(mysql), bag_(bag), cfg_(std::move(cfg)) {
   products_ = {
-      {1, 600, 60, 0, true},
-      {2, 3000, 300, 30, true},
-      {3, 9800, 980, 100, true},
+      {1, 600, 60, 0, "[]", true},
+      {2, 3000, 300, 30, "[]", true},
+      {3, 9800, 980, 100, "[]", true},
   };
 }
 
@@ -34,35 +51,55 @@ std::vector<PayProduct> PayService::ListProducts(bool include_disabled) const {
 }
 
 void PayService::ReloadFromDb(MysqlClient& mysql) {
-  auto rows = mysql.Query("SELECT id,amount_fen,diamond,gift_diamond,enabled FROM pay_product ORDER BY sort,id");
+  auto rows =
+      mysql.Query("SELECT id,amount_fen,diamond,gift_diamond,IFNULL(gift_items_json,'[]'),enabled FROM pay_product "
+                  "ORDER BY sort,id");
   if (!rows || rows->empty()) return;
   std::lock_guard<std::mutex> lk(mu_);
   products_.clear();
   for (const auto& row : *rows) {
-    if (row.cols.size() < 5) continue;
+    if (row.cols.size() < 6) continue;
     PayProduct p;
     p.id = std::stoi(row.cols[0]);
     p.amount_fen = std::stoi(row.cols[1]);
     p.diamond = std::stoi(row.cols[2]);
     p.gift_diamond = std::stoi(row.cols[3]);
-    p.enabled = row.cols[4] == "1";
+    p.gift_items_json = NormalizeGiftItems(row.cols[4]);
+    p.enabled = row.cols[5] == "1";
     products_.push_back(p);
   }
 }
 
-void PayService::UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled) {
+void PayService::UpsertProduct(int id, int amount_fen, int diamond, int gift, const std::string& gift_items_json,
+                               bool enabled) {
+  const std::string items = NormalizeGiftItems(gift_items_json);
   std::lock_guard<std::mutex> lk(mu_);
   for (auto& p : products_) {
     if (p.id == id) {
       if (amount_fen > 0) p.amount_fen = amount_fen;
       if (diamond > 0) p.diamond = diamond;
       p.gift_diamond = gift;
+      p.gift_items_json = items;
       p.enabled = enabled;
       return;
     }
   }
   if (id <= 0) id = products_.empty() ? 1 : products_.back().id + 1;
-  products_.push_back({id, amount_fen, diamond, gift, enabled});
+  products_.push_back({id, amount_fen, diamond, gift, items, enabled});
+}
+
+std::string PayService::LoadGiftItemsJson(int product_id) const {
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (const auto& p : products_) {
+      if (p.id == product_id) return p.gift_items_json.empty() ? "[]" : p.gift_items_json;
+    }
+  }
+  if (!mysql_.Available()) return "[]";
+  auto rows = mysql_.QueryBind("SELECT IFNULL(gift_items_json,'[]') FROM pay_product WHERE id=? LIMIT 1",
+                               {I64(product_id)});
+  if (!rows || rows->empty()) return "[]";
+  return NormalizeGiftItems(rows->front().cols[0]);
 }
 
 std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
@@ -92,7 +129,6 @@ std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
       o.diamond = 0;
     }
   }
-  // fallback diamond from amount if join null
   if (o.diamond <= 0) {
     std::lock_guard<std::mutex> lk(mu_);
     for (const auto& p : products_) {
@@ -184,13 +220,25 @@ std::string PayService::BuildOrderStr(const PayOrder& order) const {
 }
 
 bool PayService::PersistPaid(PayOrder& o, const std::string& trade_no) {
-  if (o.status == 1) return true;
-  o.status = 1;
-  o.alipay_trade_no = trade_no.empty() ? ("SANDBOX_" + o.order_id) : trade_no;
+  const bool already_paid = (o.status == 1);
+  if (!already_paid) {
+    o.status = 1;
+    o.alipay_trade_no = trade_no.empty() ? ("SANDBOX_" + o.order_id) : trade_no;
+    const std::string idem = "pay:" + o.order_id;
+    auto r = wallet_.Adjust(o.uid, Currency::kDiamond, o.diamond, "pay_recharge", idem, o.order_id);
+    if (!r.ok) return false;
+  }
+
   const std::string idem = "pay:" + o.order_id;
-  auto r = wallet_.Adjust(o.uid, Currency::kDiamond, o.diamond, "pay_recharge", idem, o.order_id);
-  if (!r.ok) return false;
-  if (mysql_.Available()) {
+  const std::string gifts = LoadGiftItemsJson(o.product_id);
+  if (gifts != "[]" && !gifts.empty()) {
+    std::string ierr;
+    if (!bag_.GrantItemsFromJson(o.uid, gifts, idem, "pay_gift", o.order_id, &ierr)) {
+      PLOG_WARN("PersistPaid gift items fail order=" << o.order_id << " err=" << ierr);
+    }
+  }
+
+  if (!already_paid && mysql_.Available()) {
     mysql_.ExecBind(
         "UPDATE pay_order SET status=1,alipay_trade_no=?,idempotent_paid=1,paid_at=NOW(3) WHERE order_id=?",
         {Str(o.alipay_trade_no), Str(o.order_id)});
@@ -202,8 +250,7 @@ bool PayService::HandleNotify(const std::string& order_id, const std::string& tr
   auto loaded = LoadOrder(order_id);
   if (!loaded) return false;
   PayOrder o = *loaded;
-  if (o.status == 1) return true;
-  if (amount_fen > 0 && amount_fen != o.amount_fen) return false;
+  if (amount_fen > 0 && o.status != 1 && amount_fen != o.amount_fen) return false;
   return PersistPaid(o, trade_no);
 }
 
@@ -213,7 +260,6 @@ bool PayService::SandboxComplete(int64_t uid, const std::string& order_id) {
   if (!loaded) return false;
   if (loaded->uid != uid) return false;
   PayOrder o = *loaded;
-  if (o.status == 1) return true;
   return PersistPaid(o, "SANDBOX_" + order_id);
 }
 

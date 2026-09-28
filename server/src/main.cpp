@@ -15,6 +15,7 @@
 #include "activity/activity_service.hpp"
 #include "admin/admin_service.hpp"
 #include "auth/auth_service.hpp"
+#include "bag/bag_service.hpp"
 #include "common/async_worker.hpp"
 #include "common/config.hpp"
 #include "common/log.hpp"
@@ -59,22 +60,23 @@ int main(int argc, char** argv) {
   MemoryStore store(mysql, redis, persist);
   AuthService auth(store);
   WalletService wallet(store, cfg.exchange.diamond_to_gold);
+  GameRuntime runtime(store, wallet, cfg.game);
+  BagService bag(mysql, redis, runtime.hub, persist, cfg.bag);
   AlipayConfig acfg;
   acfg.sandbox = cfg.alipay.sandbox;
   acfg.app_id = cfg.alipay.app_id;
   acfg.notify_url = cfg.alipay.notify_url;
   acfg.gateway = cfg.alipay.gateway;
-  PayService pay(wallet, mysql, acfg);
-
-  GameRuntime runtime(store, wallet, cfg.game);
+  PayService pay(wallet, mysql, bag, acfg);
   AdminService admin(mysql, redis, store, wallet, pay, runtime.lobby, runtime.hub, persist);
-  ActivityService activity(mysql, redis, wallet, runtime.hub, persist);
-  SocialService social(mysql, redis, wallet, runtime.hub, persist, cfg.social);
+  ActivityService activity(mysql, redis, wallet, bag, runtime.hub, persist);
+  SocialService social(mysql, redis, wallet, bag, runtime.hub, persist, cfg.social);
   wallet.SetOnGoldChanged([&social](int64_t uid, int64_t gold) { social.OnGoldChanged(uid, gold); });
   runtime.rooms.SetAdmin(&admin);
   runtime.rooms.SetActivity(&activity);
   runtime.rooms.SetSocial(&social);
   admin.Bootstrap();
+  bag.Bootstrap();
   activity.Bootstrap();
   social.Bootstrap();
 
@@ -84,7 +86,7 @@ int main(int argc, char** argv) {
   boost::asio::io_context http_ioc{http_workers};
   boost::asio::io_context ws_ioc{ws_workers};
 
-  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, social, mysql, redis, runtime.hub);
+  HttpApi http(cfg, store, auth, wallet, pay, admin, activity, social, bag, mysql, redis, runtime.hub);
   WsServer ws(cfg, auth, runtime, &admin);
   http.Start(http_ioc, conf_dir);
   ws.Start(ws_ioc, conf_dir);

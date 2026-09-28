@@ -64,8 +64,17 @@ async function del(it: MailItem) {
 
 function attachText(it: MailItem) {
   const a = it.attach_json || {}
-  if (!a.amount) return '无附件'
-  return `${a.currency === 2 ? '钻石' : '金币'} +${a.amount}`
+  const parts: string[] = []
+  if (a.amount) parts.push(`${a.currency === 2 ? '钻石' : '金币'} +${a.amount}`)
+  if (Array.isArray(a.items) && a.items.length) {
+    parts.push(a.items.map((x) => `道具${x.item_id}x${x.quantity}`).join(','))
+  }
+  return parts.length ? parts.join(' · ') : '无附件'
+}
+
+function hasAttach(it: MailItem) {
+  const a = it.attach_json || {}
+  return !!(a.amount || (Array.isArray(a.items) && a.items.length))
 }
 
 onMounted(load)
@@ -90,7 +99,7 @@ onMounted(load)
         <p>{{ it.body }}</p>
       </div>
       <div class="row">
-        <button :disabled="busy || it.status === 2 || !(it.attach_json && it.attach_json.amount)" @click.stop="claim(it)">
+        <button :disabled="busy || it.status === 2 || !hasAttach(it)" @click.stop="claim(it)">
           领取
         </button>
         <button class="ghost" @click.stop="del(it)">删除</button>

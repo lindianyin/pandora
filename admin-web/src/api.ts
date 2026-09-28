@@ -64,13 +64,38 @@ export const api = {
     uids?: number[]
     title: string
     body: string
-    attach_json?: { currency: number; amount: number } | Record<string, never>
+    attach_json?: { currency?: number; amount?: number; items?: Array<{ item_id: number; quantity: number; expire_sec?: number }> } | Record<string, never>
   }) => req<{ ok: boolean }>('POST', '/admin/v1/mail/send', body),
   mailLogs: (p: PageQuery = {}) =>
     req<{ total: number; items: any[] }>(
       'GET',
       `/admin/v1/mail${qs({ page: p.page, page_size: p.page_size })}`,
     ),
+  items: () => req<{ items: any[]; total?: number }>('GET', '/admin/v1/items'),
+  upsertItem: (body: any) => req('POST', '/admin/v1/items', body),
+  setItemEnabled: (id: number, enabled: boolean) =>
+    req('POST', `/admin/v1/items/${id}/enable`, { enabled }),
+  playerBag: (uid: number, includeExpired = false) =>
+    req<{ items: any[] }>('GET', `/admin/v1/players/${uid}/bag?include_expired=${includeExpired ? 1 : 0}`),
+  itemLedgers: (p: PageQuery & { item_id?: number } = {}) =>
+    req<{ total: number; items: any[] }>(
+      'GET',
+      `/admin/v1/item/ledgers${qs({ page: p.page, page_size: p.page_size, uid: p.uid, item_id: p.item_id })}`,
+    ),
+  bagGrant: (body: {
+    uid: number
+    item_id: number
+    quantity: number
+    expire_sec?: number
+    idempotent_key: string
+  }) => req<{ ok: boolean; quantity_after: number; expire_at?: string }>('POST', '/admin/v1/bag/grant', body),
+  bagRevoke: (body: {
+    uid: number
+    item_id: number
+    quantity: number
+    expire_at?: string
+    idempotent_key: string
+  }) => req<{ ok: boolean; quantity_after: number }>('POST', '/admin/v1/bag/revoke', body),
   maintain: (enabled: boolean) => req('POST', '/admin/v1/ops/maintain', { enabled }),
   audit: (p: PageQuery = {}) =>
     req<{ total: number; items: any[] }>(

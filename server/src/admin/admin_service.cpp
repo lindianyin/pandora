@@ -522,17 +522,25 @@ std::string AdminService::ListProductsJson() const {
   auto products = pay_.ListProducts(true);
   json items = json::array();
   for (const auto& p : products) {
+    json gift_items = json::array();
+    try {
+      gift_items = json::parse(p.gift_items_json.empty() ? "[]" : p.gift_items_json, nullptr, false);
+      if (!gift_items.is_array()) gift_items = json::array();
+    } catch (...) {
+      gift_items = json::array();
+    }
     items.push_back({{"id", p.id},
                      {"amount_fen", p.amount_fen},
                      {"diamond", p.diamond},
                      {"gift_diamond", p.gift_diamond},
+                     {"gift_items", gift_items},
                      {"enabled", p.enabled}});
   }
   return json{{"items", std::move(items)}}.dump();
 }
 
-bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled, const AdminSession& admin,
-                                 std::string* err) {
+bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, const std::string& gift_items_json,
+                                 bool enabled, const AdminSession& admin, std::string* err) {
   if (!RequireRole(admin, AdminRole::kOps)) {
     if (err) *err = "forbidden";
     return false;
@@ -541,17 +549,29 @@ bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, 
     if (err) *err = "mysql unavailable";
     return false;
   }
+  std::string gifts = gift_items_json.empty() ? "[]" : gift_items_json;
+  try {
+    auto j = json::parse(gifts, nullptr, false);
+    if (!j.is_array()) {
+      if (err) *err = "gift_items must be array";
+      return false;
+    }
+    gifts = j.dump();
+  } catch (...) {
+    if (err) *err = "bad gift_items json";
+    return false;
+  }
   int r = 0;
   if (id <= 0) {
-    r = mysql_.Exec("INSERT INTO pay_product(amount_fen,diamond,gift_diamond,sort,enabled) VALUES(" +
-                    std::to_string(amount_fen) + "," + std::to_string(diamond) + "," + std::to_string(gift) + ",0," +
-                    (enabled ? "1" : "0") + ")");
+    r = mysql_.ExecBind(
+        "INSERT INTO pay_product(amount_fen,diamond,gift_diamond,gift_items_json,sort,enabled) VALUES(?,?,?,?,0,?)",
+        {I64(amount_fen), I64(diamond), I64(gift), Str(gifts), I64(enabled ? 1 : 0)});
   } else {
-    r = mysql_.Exec("INSERT INTO pay_product(id,amount_fen,diamond,gift_diamond,sort,enabled) VALUES(" +
-                    std::to_string(id) + "," + std::to_string(amount_fen) + "," + std::to_string(diamond) + "," +
-                    std::to_string(gift) + ",0," + (enabled ? "1" : "0") +
-                    ") ON DUPLICATE KEY UPDATE amount_fen=VALUES(amount_fen),diamond=VALUES(diamond),"
-                    "gift_diamond=VALUES(gift_diamond),enabled=VALUES(enabled)");
+    r = mysql_.ExecBind(
+        "INSERT INTO pay_product(id,amount_fen,diamond,gift_diamond,gift_items_json,sort,enabled) VALUES(?,?,?,?,?,0,?) "
+        "ON DUPLICATE KEY UPDATE amount_fen=VALUES(amount_fen),diamond=VALUES(diamond),"
+        "gift_diamond=VALUES(gift_diamond),gift_items_json=VALUES(gift_items_json),enabled=VALUES(enabled)",
+        {I64(id), I64(amount_fen), I64(diamond), I64(gift), Str(gifts), I64(enabled ? 1 : 0)});
   }
   if (r < 0) {
     if (err) *err = mysql_.LastError();

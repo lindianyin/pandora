@@ -81,6 +81,11 @@ AppConfig LoadConfig(const std::string& path) {
   cfg.social.rank_top_n = social.value("rank_top_n", cfg.social.rank_top_n);
   cfg.social.rank_score_mode = social.value("rank_score_mode", cfg.social.rank_score_mode);
 
+  const auto bag = root.value("bag", nlohmann::json::object());
+  cfg.bag.lazy_expire = bag.value("lazy_expire", cfg.bag.lazy_expire);
+  cfg.bag.cleanup_interval_s = bag.value("cleanup_interval_s", cfg.bag.cleanup_interval_s);
+  cfg.bag.max_rows_per_uid = bag.value("max_rows_per_uid", cfg.bag.max_rows_per_uid);
+
   if (cfg.store_backend == "mysql") {
     PLOG_WARN("store.backend=mysql selected; ledger uses MemoryStore over MySQL/Redis drivers");
     cfg.store_backend = "memory";

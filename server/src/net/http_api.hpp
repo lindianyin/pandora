@@ -3,6 +3,7 @@
 #include "activity/activity_service.hpp"
 #include "admin/admin_service.hpp"
 #include "auth/auth_service.hpp"
+#include "bag/bag_service.hpp"
 #include "common/config.hpp"
 #include "net/session_hub.hpp"
 #include "pay/pay_service.hpp"
@@ -20,7 +21,7 @@ namespace pandora {
 class HttpApi {
  public:
   HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
-          AdminService& admin, ActivityService& activity, SocialService& social, MysqlClient& mysql,
+          AdminService& admin, ActivityService& activity, SocialService& social, BagService& bag, MysqlClient& mysql,
           RedisClient& redis, SessionHub& hub);
   void Start(boost::asio::io_context& ioc, const std::filesystem::path& conf_dir = {});
 
@@ -32,6 +33,7 @@ class HttpApi {
   AdminService& admin() { return admin_; }
   ActivityService& activity() { return activity_; }
   SocialService& social() { return social_; }
+  BagService& bag() { return bag_; }
   MysqlClient& mysql() { return mysql_; }
   RedisClient& redis() { return redis_; }
   SessionHub& hub() { return hub_; }
@@ -45,6 +47,7 @@ class HttpApi {
   AdminService& admin_;
   ActivityService& activity_;
   SocialService& social_;
+  BagService& bag_;
   MysqlClient& mysql_;
   RedisClient& redis_;
   SessionHub& hub_;

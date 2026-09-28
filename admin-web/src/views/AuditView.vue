@@ -29,11 +29,24 @@ onMounted(load)
 </script>
 <template>
   <h2>审计</h2>
-  <el-space style="margin-bottom: 12px">
-    <el-input v-model="q" clearable placeholder="动作 / 目标" style="width: 220px" @keyup.enter="search" />
-    <el-button type="primary" @click="search">查找</el-button>
-    <el-button @click="load">刷新</el-button>
-  </el-space>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>关键词</label>
+      <el-input
+        v-model="q"
+        clearable
+        class="admin-filter-control"
+        placeholder="动作 / 目标"
+        @keyup.enter="search"
+      />
+      <span class="admin-filter-tip">按操作动作或目标内容筛选</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="primary" @click="search">查询</el-button>
+      <el-button @click="q = ''; search()">清空条件</el-button>
+      <el-button @click="load">刷新</el-button>
+    </div>
+  </div>
   <el-table :data="items" border>
     <el-table-column prop="admin_id" label="管理员" width="90" />
     <el-table-column prop="action" label="动作" width="140" />

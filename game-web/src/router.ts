@@ -57,6 +57,12 @@ const router = createRouter({
       component: () => import('./views/RankView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/bag',
+      name: 'bag',
+      component: () => import('./views/BagView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

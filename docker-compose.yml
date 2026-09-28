@@ -8,6 +8,7 @@ services:
     ports:
       - "3306:3306"
     environment:
+      TZ: Asia/Shanghai
       MYSQL_ROOT_PASSWORD: pandora
       MYSQL_DATABASE: pandora
       MYSQL_USER: pandora
@@ -15,6 +16,7 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
     volumes:
       - pandora-mysql-data:/var/lib/mysql
       - ./server/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro

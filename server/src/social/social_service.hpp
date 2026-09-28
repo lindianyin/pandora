@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "bag/bag_service.hpp"
 #include "common/async_worker.hpp"
 #include "common/config.hpp"
 #include "net/session_hub.hpp"
@@ -22,8 +23,8 @@ struct SocialOpResult {
 
 class SocialService {
  public:
-  SocialService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub, AsyncWorker& persist,
-                SocialConfig cfg);
+  SocialService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, BagService& bag, SessionHub& hub,
+                AsyncWorker& persist, SocialConfig cfg);
 
   void Bootstrap();
 
@@ -75,6 +76,7 @@ class SocialService {
   MysqlClient& mysql_;
   RedisClient& redis_;
   WalletService& wallet_;
+  BagService& bag_;
   SessionHub& hub_;
   AsyncWorker& persist_;
   SocialConfig cfg_;

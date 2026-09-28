@@ -25,9 +25,9 @@ json ParseJsonOr(const std::string& s, json fallback) {
 
 }  // namespace
 
-ActivityService::ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub,
-                                 AsyncWorker& persist)
-    : mysql_(mysql), redis_(redis), wallet_(wallet), hub_(hub), persist_(persist) {}
+ActivityService::ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, BagService& bag,
+                                 SessionHub& hub, AsyncWorker& persist)
+    : mysql_(mysql), redis_(redis), wallet_(wallet), bag_(bag), hub_(hub), persist_(persist) {}
 
 std::string ActivityService::EscapeSql(const std::string& s) const {
   std::string o;
@@ -556,30 +556,49 @@ ClaimResult ActivityService::Claim(int64_t uid, int activity_id, const std::stri
 
     int currency = 1;
     int64_t amount = 0;
-    auto rp = def->rules_json.find("\"reward\"");
-    if (rp != std::string::npos) {
-      currency = ExtractInt(def->rules_json.substr(rp), "currency", 1);
-      amount = ExtractInt(def->rules_json.substr(rp), "amount", 0);
+    json items = json::array();
+    try {
+      const auto rules = json::parse(def->rules_json.empty() ? "{}" : def->rules_json, nullptr, false);
+      if (rules.is_object() && rules.contains("reward") && rules["reward"].is_object()) {
+        const auto& reward = rules["reward"];
+        currency = reward.value("currency", 1);
+        amount = reward.value("amount", static_cast<int64_t>(0));
+        if (reward.contains("items") && reward["items"].is_array()) items = reward["items"];
+      }
+    } catch (...) {
     }
-    if (amount <= 0) {
+    if (amount <= 0 && items.empty()) {
       r.error = "bad reward";
       return r;
     }
 
     const std::string idem = "act:" + std::to_string(activity_id) + ":" + std::to_string(uid) + ":" + claim_key;
-    auto adj = wallet_.Adjust(uid, currency == 2 ? Currency::kDiamond : Currency::kGold, amount, "activity_reward",
-                              idem, claim_key);
-    if (!adj.ok) {
-      r.error = adj.error.empty() ? "adjust failed" : adj.error;
-      return r;
+    if (amount > 0) {
+      auto adj = wallet_.Adjust(uid, currency == 2 ? Currency::kDiamond : Currency::kGold, amount, "activity_reward",
+                                idem, claim_key);
+      if (!adj.ok) {
+        r.error = adj.error.empty() ? "adjust failed" : adj.error;
+        return r;
+      }
+      r.balance = adj.balance;
+      r.currency = currency;
+    } else {
+      auto p = wallet_.Profile(uid);
+      r.balance = p ? (currency == 2 ? p->diamond : p->gold) : 0;
+      r.currency = currency;
+    }
+    if (!items.empty()) {
+      std::string ierr;
+      if (!bag_.GrantItemsFromJson(uid, items.dump(), idem, "activity_reward", claim_key, &ierr)) {
+        r.error = ierr.empty() ? "bag grant failed" : ierr;
+        return r;
+      }
     }
     MarkClaimed(uid, activity_id, claim_key);
     if (def->type == "sign") {
       SaveProgress(uid, activity_id, json{{"last_sign_day", TodayKey()}, {"signed_today", true}}.dump());
     }
     r.ok = true;
-    r.balance = adj.balance;
-    r.currency = currency;
     PushUpdate(uid, *def, LoadProgress(uid, activity_id), false);
     return r;
   } catch (const std::exception& e) {

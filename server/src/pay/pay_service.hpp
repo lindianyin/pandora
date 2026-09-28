@@ -4,9 +4,9 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "bag/bag_service.hpp"
 #include "store/mysql_client.hpp"
 #include "wallet/wallet_service.hpp"
 
@@ -17,6 +17,7 @@ struct PayProduct {
   int amount_fen{0};
   int diamond{0};
   int gift_diamond{0};
+  std::string gift_items_json{"[]"};
   bool enabled{true};
 };
 
@@ -42,7 +43,7 @@ struct AlipayConfig {
 
 class PayService {
  public:
-  PayService(WalletService& wallet, MysqlClient& mysql, AlipayConfig cfg);
+  PayService(WalletService& wallet, MysqlClient& mysql, BagService& bag, AlipayConfig cfg);
 
   std::vector<PayProduct> ListProducts(bool include_disabled = false) const;
   std::optional<PayOrder> CreateOrder(int64_t uid, int product_id);
@@ -52,16 +53,18 @@ class PayService {
   bool Sandbox() const { return cfg_.sandbox; }
 
   void ReloadFromDb(MysqlClient& mysql);
-  void UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled);
+  void UpsertProduct(int id, int amount_fen, int diamond, int gift, const std::string& gift_items_json, bool enabled);
   std::vector<PayOrder> ListOrders(size_t limit = 100) const;
 
  private:
   std::string Escape(const std::string& s) const;
   std::optional<PayOrder> LoadOrder(const std::string& order_id);
   bool PersistPaid(PayOrder& o, const std::string& trade_no);
+  std::string LoadGiftItemsJson(int product_id) const;
 
   WalletService& wallet_;
   MysqlClient& mysql_;
+  BagService& bag_;
   AlipayConfig cfg_;
   mutable std::mutex mu_;
   std::vector<PayProduct> products_;

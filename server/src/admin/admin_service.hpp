@@ -84,8 +84,8 @@ class AdminService {
   bool PutTemplate(int id, const std::string& name, int base_score, int rake_bp, int64_t min_gold, int64_t max_gold,
                    bool enabled, const AdminSession& admin, std::string* err);
   std::string ListProductsJson() const;
-  bool UpsertProduct(int id, int amount_fen, int diamond, int gift, bool enabled, const AdminSession& admin,
-                     std::string* err);
+  bool UpsertProduct(int id, int amount_fen, int diamond, int gift, const std::string& gift_items_json, bool enabled,
+                     const AdminSession& admin, std::string* err);
   bool SetProductEnabled(int id, bool enabled, const AdminSession& admin, std::string* err);
   bool DeleteProduct(int id, const AdminSession& admin, std::string* err);
   std::string ListOrdersJson(int64_t uid, int status, int page, int page_size) const;

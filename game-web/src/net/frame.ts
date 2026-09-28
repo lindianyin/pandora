@@ -22,6 +22,7 @@ export const MsgId = {
   S2C_DdzSettle: 2007,
   S2C_DdzReconnect: 2008,
   S2C_ActivityUpdate: 3001,
+  S2C_BagUpdate: 5001,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {

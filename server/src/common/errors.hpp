@@ -16,6 +16,10 @@ enum class Err : int32_t {
   kFriendIllegal = 2101,
   kMailIllegal = 2102,
   kRankIllegal = 2103,
+  kItemUnavailable = 2201,
+  kItemInsufficient = 2202,
+  kItemExpired = 2203,
+  kItemBadKind = 2204,
   kMaintain = 5000,
   kBanned = 5001,
   kInternal = 9999,
@@ -43,6 +47,14 @@ inline const char* ErrMessage(Err e) {
       return "mail missing or claimed";
     case Err::kRankIllegal:
       return "rank period illegal";
+    case Err::kItemUnavailable:
+      return "item unavailable";
+    case Err::kItemInsufficient:
+      return "insufficient item";
+    case Err::kItemExpired:
+      return "item expired";
+    case Err::kItemBadKind:
+      return "item kind mismatch";
     case Err::kMaintain:
       return "maintain";
     case Err::kBanned:
@@ -86,6 +98,8 @@ constexpr uint32_t kS2C_ActivityUpdate = 3001;
 
 constexpr uint32_t kS2C_MailNotify = 4001;
 constexpr uint32_t kS2C_FriendNotify = 4002;
+
+constexpr uint32_t kS2C_BagUpdate = 5001;
 }  // namespace MsgId
 
 }  // namespace pandora

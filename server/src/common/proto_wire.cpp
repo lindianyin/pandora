@@ -1,6 +1,7 @@
 #include "common/proto_wire.hpp"
 
 #include <activity.pb.h>
+#include <bag.pb.h>
 #include <common.pb.h>
 #include <game_ddz.pb.h>
 #include <lobby.pb.h>
@@ -237,6 +238,16 @@ std::vector<uint8_t> EncodeS2C_FriendNotify(int32_t kind, int64_t from_uid, cons
   m.set_kind(kind);
   m.set_from_uid(from_uid);
   m.set_nickname(nickname);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_BagUpdate(int32_t item_id, int64_t quantity, const std::string& expire_at,
+                                          int32_t reason) {
+  S2C_BagUpdate m;
+  m.set_item_id(item_id);
+  m.set_quantity(quantity);
+  m.set_expire_at(expire_at);
+  m.set_reason(reason);
   return Serialize(m);
 }
 

@@ -33,11 +33,17 @@ onMounted(load)
 </script>
 <template>
   <h2>账变</h2>
-  <el-space style="margin-bottom: 12px">
-    <el-input-number v-model="uid" :min="0" placeholder="UID" controls-position="right" />
-    <el-button type="primary" @click="search">按 UID 查找</el-button>
-    <el-button @click="uid = undefined; search()">清空</el-button>
-  </el-space>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>玩家 UID</label>
+      <el-input-number v-model="uid" :min="0" controls-position="right" placeholder="0 表示不限" />
+      <span class="admin-filter-tip">按玩家查货币账变；0/空为全部</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="primary" @click="search">查询</el-button>
+      <el-button @click="uid = undefined; search()">清空条件</el-button>
+    </div>
+  </div>
   <el-table :data="items" border>
     <el-table-column prop="id" label="ID" width="80" />
     <el-table-column prop="uid" label="UID" width="100" />

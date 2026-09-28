@@ -120,11 +120,24 @@ onMounted(load)
     <el-button type="primary" @click="save">保存 / 热更</el-button>
   </el-form>
 
-  <el-space style="margin-bottom: 12px">
-    <el-input v-model="q" clearable placeholder="ID / 类型 / 标题" style="width: 220px" @keyup.enter="search" />
-    <el-button type="primary" @click="search">查找</el-button>
-    <el-button @click="load">刷新</el-button>
-  </el-space>
+  <div class="admin-filter">
+    <div class="admin-filter-field">
+      <label>关键词</label>
+      <el-input
+        v-model="q"
+        clearable
+        class="admin-filter-control"
+        placeholder="ID / 类型 / 标题"
+        @keyup.enter="search"
+      />
+      <span class="admin-filter-tip">按活动 ID、类型或标题筛选</span>
+    </div>
+    <div class="admin-filter-actions">
+      <el-button type="primary" @click="search">查询</el-button>
+      <el-button @click="q = ''; search()">清空条件</el-button>
+      <el-button @click="load">刷新</el-button>
+    </div>
+  </div>
 
   <el-table :data="items" border>
     <el-table-column prop="id" label="ID" width="70" />

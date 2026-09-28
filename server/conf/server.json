@@ -54,6 +54,11 @@
     "mail_broadcast_batch": 500,
     "rank_top_n": 100,
     "rank_score_mode": "gold"
+  },
+  "bag": {
+    "lazy_expire": true,
+    "cleanup_interval_s": 3600,
+    "max_rows_per_uid": 500
   }
 }
-
+

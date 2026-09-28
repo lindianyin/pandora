@@ -172,7 +172,7 @@ struct HttpResult {
 
 HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*store*/, AuthService& auth,
                     WalletService& wallet, PayService& pay, AdminService& admin, ActivityService& activity,
-                    SocialService& social, MysqlClient& mysql, RedisClient& redis, SessionHub& hub,
+                    SocialService& social, BagService& bag, MysqlClient& mysql, RedisClient& redis, SessionHub& hub,
                     const AppConfig& cfg) {
   HttpResult out;
   const std::string method(req.method_string());
@@ -272,16 +272,48 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
                            trace));
       }
     }
+  } else if (method == "GET" && path == "/api/v1/bag/list") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      const bool include_expired = QueryInt(query, "include_expired", 0) != 0;
+      setJson(200, OkObj(json::parse(bag.ListBagJson(*uid, include_expired), nullptr, false), trace));
+    }
+  } else if (method == "POST" && path == "/api/v1/bag/use") {
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      std::string idem = JStr(body, "idempotent_key");
+      if (idem.empty()) idem = "bag_use:" + std::to_string(*uid) + ":" + std::to_string(JInt(body, "item_id")) + ":" +
+                               std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                  std::chrono::system_clock::now().time_since_epoch())
+                                                  .count());
+      auto cr = bag.Consume(*uid, static_cast<int>(JInt(body, "item_id")), JInt(body, "quantity", 1),
+                            JStr(body, "expire_at"), idem, "bag_use", "");
+      if (!cr.ok)
+        setJson(400, ErrObj(static_cast<Err>(cr.err_code ? cr.err_code : static_cast<int>(Err::kBadParam)), trace,
+                           cr.error));
+      else
+        setJson(200, OkObj({{"quantity_after", cr.quantity_after}, {"expire_at", cr.expire_at}}, trace));
+    }
   } else if (method == "GET" && path.rfind("/api/v1/pay/products", 0) == 0) {
     auto uid = requirePlayer();
     if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
     else {
       json items = json::array();
       for (const auto& p : pay.ListProducts(false)) {
+        json gift_items = json::array();
+        try {
+          gift_items = json::parse(p.gift_items_json.empty() ? "[]" : p.gift_items_json, nullptr, false);
+          if (!gift_items.is_array()) gift_items = json::array();
+        } catch (...) {
+          gift_items = json::array();
+        }
         items.push_back({{"id", p.id},
                          {"amount_fen", p.amount_fen},
                          {"diamond", p.diamond},
-                         {"gift_diamond", p.gift_diamond}});
+                         {"gift_diamond", p.gift_diamond},
+                         {"gift_items", gift_items}});
       }
       setJson(200, OkObj({{"items", items}, {"sandbox", pay.Sandbox()}}, trace));
     }
@@ -473,7 +505,8 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
       else setJson(200, OkObj(json::parse(admin.DashboardJson(), nullptr, false), trace));
     } else if (method == "GET" && path.rfind("/admin/v1/players", 0) == 0 && path.find("/kick") == std::string::npos &&
-               path.find("/ban") == std::string::npos && path.find("/unban") == std::string::npos) {
+               path.find("/ban") == std::string::npos && path.find("/unban") == std::string::npos &&
+               path.find("/bag") == std::string::npos) {
       auto s = requireAdmin(AdminRole::kCs);
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
       else {
@@ -571,10 +604,19 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
       if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
       else {
         std::string err;
+        std::string gift_items = "[]";
+        if (body.contains("gift_items") && body["gift_items"].is_array())
+          gift_items = body["gift_items"].dump();
+        else if (body.contains("gift_items_json")) {
+          if (body["gift_items_json"].is_array())
+            gift_items = body["gift_items_json"].dump();
+          else
+            gift_items = JStr(body, "gift_items_json", "[]");
+        }
         const bool ok = admin.UpsertProduct(static_cast<int>(JInt(body, "id")), static_cast<int>(JInt(body, "amount_fen")),
                                            static_cast<int>(JInt(body, "diamond")),
-                                           static_cast<int>(JInt(body, "gift_diamond")), JBool(body, "enabled", true),
-                                           *s, &err);
+                                           static_cast<int>(JInt(body, "gift_diamond")), gift_items,
+                                           JBool(body, "enabled", true), *s, &err);
         if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
         else setJson(200, OkObj({{"ok", true}}, trace));
       }
@@ -635,6 +677,102 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
         const int page = QueryInt(query, "page", 1);
         const int page_size = QueryInt(query, "page_size", 20);
         setJson(200, OkObj(json::parse(admin.ListAuditJson(aq, page, page_size), nullptr, false), trace));
+      }
+    } else if (method == "GET" && path == "/admin/v1/items") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else setJson(200, OkObj(json::parse(bag.ListDefsJson(true), nullptr, false), trace));
+    } else if ((method == "POST" || method == "PUT") && path == "/admin/v1/items") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        ItemDef d;
+        d.id = static_cast<int>(JInt(body, "id"));
+        d.name = JStr(body, "name");
+        d.icon = JStr(body, "icon");
+        d.kind = JStr(body, "kind", "qty");
+        d.stackable = JBool(body, "stackable", true);
+        d.default_expire_sec = static_cast<int>(JInt(body, "default_expire_sec"));
+        d.tag = JStr(body, "tag");
+        d.enabled = JBool(body, "enabled", true);
+        std::string err;
+        if (!bag.UpsertDef(d, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
+          admin.Audit(s->admin_id, "upsert_item", d.name, "", d.kind);
+          setJson(200, OkObj({{"ok", true}}, trace));
+        }
+      }
+    } else if (method == "POST" && path.rfind("/admin/v1/items/", 0) == 0 && path.find("/enable") != std::string::npos) {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int id = static_cast<int>(PathUid(path, "/admin/v1/items/"));
+        const bool enabled = JBool(body, "enabled", true);
+        std::string err;
+        if (!bag.SetDefEnabled(id, enabled, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else {
+          admin.Audit(s->admin_id, enabled ? "enable_item" : "disable_item", std::to_string(id), "",
+                      enabled ? "1" : "0");
+          setJson(200, OkObj({{"ok", true}, {"enabled", enabled}}, trace));
+        }
+      }
+    } else if (method == "GET" && path.rfind("/admin/v1/players/", 0) == 0 && path.find("/bag") != std::string::npos) {
+      auto s = requireAdmin(AdminRole::kCs);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int64_t uid = PathUid(path, "/admin/v1/players/");
+        const bool include_expired = QueryInt(query, "include_expired", 0) != 0;
+        setJson(200, OkObj(json::parse(bag.ListBagJson(uid, include_expired), nullptr, false), trace));
+      }
+    } else if (method == "GET" && path.rfind("/admin/v1/item/ledgers", 0) == 0) {
+      auto s = requireAdmin(AdminRole::kCs);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        const int64_t uid = QueryI64(query, "uid", 0);
+        const int item_id = QueryInt(query, "item_id", 0);
+        const int page = QueryInt(query, "page", 1);
+        const int page_size = QueryInt(query, "page_size", 20);
+        setJson(200, OkObj(json::parse(bag.ListLedgersJson(uid, item_id, page, page_size), nullptr, false), trace));
+      }
+    } else if (method == "POST" && path == "/admin/v1/bag/grant") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        ExpirePolicy pol;
+        const int expire_sec = static_cast<int>(JInt(body, "expire_sec"));
+        if (expire_sec > 0) {
+          pol.mode = ExpirePolicy::Mode::kDurationSec;
+          pol.duration_sec = expire_sec;
+        }
+        std::string idem = JStr(body, "idempotent_key");
+        if (idem.empty()) idem = "admin_grant:" + std::to_string(s->admin_id) + ":" + MakeTrace();
+        auto gr = bag.Grant(JInt(body, "uid"), static_cast<int>(JInt(body, "item_id")), JInt(body, "quantity", 1), pol,
+                            idem, "gm_grant", std::to_string(s->admin_id));
+        if (!gr.ok)
+          setJson(400, ErrObj(static_cast<Err>(gr.err_code ? gr.err_code : static_cast<int>(Err::kBadParam)), trace,
+                             gr.error));
+        else {
+          admin.Audit(s->admin_id, "bag_grant", std::to_string(JInt(body, "uid")), "",
+                      json{{"item_id", JInt(body, "item_id")}, {"quantity", JInt(body, "quantity", 1)}}.dump());
+          setJson(200, OkObj({{"ok", true}, {"quantity_after", gr.quantity_after}, {"expire_at", gr.expire_at}}, trace));
+        }
+      }
+    } else if (method == "POST" && path == "/admin/v1/bag/revoke") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::string idem = JStr(body, "idempotent_key");
+        if (idem.empty()) idem = "admin_revoke:" + std::to_string(s->admin_id) + ":" + MakeTrace();
+        auto cr = bag.Consume(JInt(body, "uid"), static_cast<int>(JInt(body, "item_id")), JInt(body, "quantity", 1),
+                              JStr(body, "expire_at"), idem, "gm_revoke", std::to_string(s->admin_id));
+        if (!cr.ok)
+          setJson(400, ErrObj(static_cast<Err>(cr.err_code ? cr.err_code : static_cast<int>(Err::kBadParam)), trace,
+                             cr.error));
+        else {
+          admin.Audit(s->admin_id, "bag_revoke", std::to_string(JInt(body, "uid")), "",
+                      json{{"item_id", JInt(body, "item_id")}, {"quantity", JInt(body, "quantity", 1)}}.dump());
+          setJson(200, OkObj({{"ok", true}, {"quantity_after", cr.quantity_after}}, trace));
+        }
       }
     } else if (method == "GET" && path == "/admin/v1/activities") {
       auto s = requireAdmin(AdminRole::kOps);
@@ -857,7 +995,7 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
 
 HttpResult HandleRequest(HttpApi* api, const http::request<http::string_body>& req) {
   return Dispatch(req, api->store(), api->auth(), api->wallet(), api->pay(), api->admin(), api->activity(),
-                  api->social(), api->mysql(), api->redis(), api->hub(), api->cfg());
+                  api->social(), api->bag(), api->mysql(), api->redis(), api->hub(), api->cfg());
 }
 
 std::shared_ptr<http::response<http::string_body>> MakeResponse(const http::request<http::string_body>& req,
@@ -981,8 +1119,8 @@ class HttpListener : public std::enable_shared_from_this<HttpListener> {
 }  // namespace
 
 HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletService& wallet, PayService& pay,
-                 AdminService& admin, ActivityService& activity, SocialService& social, MysqlClient& mysql,
-                 RedisClient& redis, SessionHub& hub)
+                 AdminService& admin, ActivityService& activity, SocialService& social, BagService& bag,
+                 MysqlClient& mysql, RedisClient& redis, SessionHub& hub)
     : cfg_(std::move(cfg)),
       store_(store),
       auth_(auth),
@@ -991,6 +1129,7 @@ HttpApi::HttpApi(AppConfig cfg, MemoryStore& store, AuthService& auth, WalletSer
       admin_(admin),
       activity_(activity),
       social_(social),
+      bag_(bag),
       mysql_(mysql),
       redis_(redis),
       hub_(hub) {}

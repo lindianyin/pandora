@@ -165,6 +165,10 @@ onMounted(() => {
         <span class="meta">
           {{ p.diamond }} 钻
           <template v-if="p.gift_diamond"> +赠 {{ p.gift_diamond }}</template>
+          <template v-if="p.gift_items?.length">
+            · 赠道具
+            {{ p.gift_items.map((x) => `${x.item_id}x${x.quantity}`).join(',') }}
+          </template>
         </span>
       </div>
       <button :disabled="busy" @click="buy(p.id)">下单</button>

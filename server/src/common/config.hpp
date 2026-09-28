@@ -69,6 +69,12 @@ struct SocialConfig {
   std::string rank_score_mode{"gold"};  // gold | net_win (net_win 二期)
 };
 
+struct BagConfig {
+  bool lazy_expire{true};
+  int cleanup_interval_s{3600};
+  int max_rows_per_uid{500};
+};
+
 struct AppConfig {
   NetConfig net;
   GameConfig game;
@@ -78,10 +84,11 @@ struct AppConfig {
   RedisConfig redis;
   WorkerConfig worker;
   SocialConfig social;
+  BagConfig bag;
   std::string store_backend{"memory"};  // memory | mysql (mysql driver optional; falls back)
 };
 
 AppConfig LoadConfig(const std::string& path);
 
 }  // namespace pandora
-
+

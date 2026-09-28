@@ -41,6 +41,7 @@ onMounted(() => {
       <button class="ghost" @click="router.push('/friends')">好友</button>
       <button class="ghost" @click="router.push('/mail')">邮件</button>
       <button class="ghost" @click="router.push('/rank')">排行</button>
+      <button class="ghost" @click="router.push('/bag')">背包</button>
     </div>
   </section>
 

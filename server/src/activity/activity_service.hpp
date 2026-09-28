@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "bag/bag_service.hpp"
 #include "common/async_worker.hpp"
 #include "net/session_hub.hpp"
 #include "store/mysql_client.hpp"
@@ -43,7 +44,8 @@ struct ClaimResult {
 
 class ActivityService {
  public:
-  ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, SessionHub& hub, AsyncWorker& persist);
+  ActivityService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, BagService& bag, SessionHub& hub,
+                  AsyncWorker& persist);
 
   void Bootstrap();
   void Reload();
@@ -81,6 +83,7 @@ class ActivityService {
   MysqlClient& mysql_;
   RedisClient& redis_;
   WalletService& wallet_;
+  BagService& bag_;
   SessionHub& hub_;
   AsyncWorker& persist_;
 
