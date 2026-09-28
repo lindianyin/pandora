@@ -195,17 +195,15 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
   int total = 0;
   if (!mysql_.Available()) return json{{"items", items}, {"total", 0}, {"page", page}, {"page_size", page_size}}.dump();
 
-  const std::string like1 = "%\"uid\":" + std::to_string(uid) + "%";
-  const std::string like2 = "%\"uid\": " + std::to_string(uid) + "%";
-  auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM game_round WHERE players_json LIKE ? OR players_json LIKE ?",
-                              {Str(like1), Str(like2)});
+  auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM game_round_player WHERE uid=?", {I64(uid)});
   if (cnt && !cnt->empty() && !cnt->front().cols.empty()) total = ParseInt(cnt->front().cols[0]);
 
   const int64_t offset = static_cast<int64_t>(page - 1) * page_size;
   auto rows = mysql_.QueryBind(
-      "SELECT round_id,template_id,players_json,base_score,multiplier,ended_at FROM game_round "
-      "WHERE players_json LIKE ? OR players_json LIKE ? ORDER BY ended_at DESC LIMIT ? OFFSET ?",
-      {Str(like1), Str(like2), I64(page_size), I64(offset)});
+      "SELECT g.round_id,g.template_id,g.players_json,g.base_score,g.multiplier,g.ended_at "
+      "FROM game_round_player p INNER JOIN game_round g ON g.round_id=p.round_id "
+      "WHERE p.uid=? ORDER BY p.ended_at DESC LIMIT ? OFFSET ?",
+      {I64(uid), I64(page_size), I64(offset)});
   if (rows) {
     for (const auto& row : *rows) {
       if (row.cols.size() < 6) continue;
@@ -237,7 +235,13 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
 
 int SocialService::FriendCount(int64_t uid) const {
   if (!mysql_.Available()) return 0;
-  auto rows = mysql_.QueryBind("SELECT COUNT(*) FROM friendship WHERE uid_low=? OR uid_high=?", {I64(uid), I64(uid)});
+  auto rows = mysql_.QueryBind(
+      "SELECT COUNT(*) FROM ("
+      "  SELECT uid_high AS fuid FROM friendship WHERE uid_low=?"
+      "  UNION ALL"
+      "  SELECT uid_low AS fuid FROM friendship WHERE uid_high=?"
+      ") t",
+      {I64(uid), I64(uid)});
   if (!rows || rows->empty() || rows->front().cols.empty()) return 0;
   return ParseInt(rows->front().cols[0]);
 }
@@ -262,9 +266,12 @@ std::string SocialService::FriendListJson(int64_t uid) const {
   json items = json::array();
   if (!mysql_.Available()) return json{{"items", items}}.dump();
   auto rows = mysql_.QueryBind(
-      "SELECT CASE WHEN uid_low=? THEN uid_high ELSE uid_low END AS fuid FROM friendship "
-      "WHERE uid_low=? OR uid_high=?",
-      {I64(uid), I64(uid), I64(uid)});
+      "SELECT fuid FROM ("
+      "  SELECT uid_high AS fuid FROM friendship WHERE uid_low=?"
+      "  UNION ALL"
+      "  SELECT uid_low AS fuid FROM friendship WHERE uid_high=?"
+      ") t",
+      {I64(uid), I64(uid)});
   if (rows) {
     for (const auto& row : *rows) {
       if (row.cols.empty()) continue;
@@ -432,7 +439,7 @@ std::string SocialService::MailListJson(int64_t uid) const {
   if (!mysql_.Available()) return json{{"items", items}}.dump();
   auto rows = mysql_.QueryBind(
       "SELECT id,title,body,attach_json,status,expire_at,created_at FROM mail "
-      "WHERE to_uid=? AND status<>3 AND expire_at>NOW(3) ORDER BY id DESC LIMIT 100",
+      "WHERE to_uid=? AND status IN (0,1,2) AND expire_at>NOW(3) ORDER BY id DESC LIMIT 100",
       {I64(uid)});
   if (rows) {
     for (const auto& row : *rows) {
@@ -477,7 +484,7 @@ SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
     return r;
   }
   auto rows = mysql_.QueryBind(
-      "SELECT attach_json,status,expire_at FROM mail WHERE id=? AND to_uid=? AND status<>3 LIMIT 1",
+      "SELECT attach_json,status,expire_at FROM mail WHERE id=? AND to_uid=? AND status IN (0,1,2) LIMIT 1",
       {I64(mail_id), I64(uid)});
   if (!rows || rows->empty() || rows->front().cols.size() < 3) {
     r.error = "mail not found";
@@ -549,7 +556,7 @@ bool SocialService::MailDelete(int64_t uid, int64_t mail_id, std::string* err) {
     if (err) *err = "mysql unavailable";
     return false;
   }
-  const int r = mysql_.ExecBind("UPDATE mail SET status=3 WHERE id=? AND to_uid=? AND status<>3", {I64(mail_id), I64(uid)});
+  const int r = mysql_.ExecBind("UPDATE mail SET status=3 WHERE id=? AND to_uid=? AND status IN (0,1,2)", {I64(mail_id), I64(uid)});
   if (r <= 0) {
     if (err) *err = "mail not found";
     return false;

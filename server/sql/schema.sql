@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS `player_profile` (
   `gold` BIGINT NOT NULL DEFAULT 10000,
   `diamond` BIGINT NOT NULL DEFAULT 0,
   `level` INT NOT NULL DEFAULT 1,
-  PRIMARY KEY (`uid`)
+  PRIMARY KEY (`uid`),
+  KEY `idx_gold_uid` (`gold`, `uid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `ledger` (
@@ -38,7 +39,8 @@ CREATE TABLE IF NOT EXISTS `ledger` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idempotent` (`idempotent_key`),
-  KEY `idx_uid_time` (`uid`, `created_at`)
+  KEY `idx_uid_time` (`uid`, `created_at`),
+  KEY `idx_uid_id` (`uid`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `room_template` (
@@ -64,7 +66,17 @@ CREATE TABLE IF NOT EXISTS `game_round` (
   `started_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `ended_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`round_id`),
-  KEY `idx_room` (`room_id`)
+  KEY `idx_room` (`room_id`),
+  KEY `idx_ended_at` (`ended_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `game_round_player` (
+  `round_id` BIGINT NOT NULL,
+  `uid` BIGINT NOT NULL,
+  `ended_at` DATETIME(3) NOT NULL,
+  PRIMARY KEY (`uid`, `round_id`),
+  KEY `idx_uid_ended` (`uid`, `ended_at`),
+  KEY `idx_round` (`round_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `activity_define` (
@@ -125,7 +137,8 @@ CREATE TABLE IF NOT EXISTS `pay_order` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   `paid_at` DATETIME(3) NOT NULL DEFAULT '1970-01-01 00:00:00.000' COMMENT '哨兵=未支付',
   PRIMARY KEY (`order_id`),
-  KEY `idx_uid` (`uid`)
+  KEY `idx_uid` (`uid`),
+  KEY `idx_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `admin_user` (
@@ -174,7 +187,8 @@ CREATE TABLE IF NOT EXISTS `friend_request` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_from_to` (`from_uid`, `to_uid`),
-  KEY `idx_to_status` (`to_uid`, `status`)
+  KEY `idx_to_status` (`to_uid`, `status`),
+  KEY `idx_from_status` (`from_uid`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `friendship` (
@@ -196,7 +210,8 @@ CREATE TABLE IF NOT EXISTS `mail` (
   `expire_at` DATETIME(3) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  KEY `idx_uid_status` (`to_uid`, `status`, `id`)
+  KEY `idx_uid_status` (`to_uid`, `status`, `id`),
+  KEY `idx_to_uid_id` (`to_uid`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `mail_send_log` (
@@ -223,7 +238,8 @@ CREATE TABLE IF NOT EXISTS `rank_snapshot` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_period_uid` (`period`, `period_key`, `uid`),
-  KEY `idx_period_rank` (`period`, `period_key`, `rank_no`)
+  KEY `idx_period_rank` (`period`, `period_key`, `rank_no`),
+  KEY `idx_period_created` (`period`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO `room_template` (`id`, `game_id`, `name`, `base_score`, `rake_bp`, `min_gold`, `max_gold`, `enabled`)
@@ -264,8 +280,7 @@ CREATE TABLE IF NOT EXISTS `bag_item` (
   `expire_at` DATETIME(3) NOT NULL,
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_uid_item_expire` (`uid`, `item_id`, `expire_at`),
-  KEY `idx_uid_item` (`uid`, `item_id`)
+  UNIQUE KEY `uk_uid_item_expire` (`uid`, `item_id`, `expire_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `item_ledger` (
@@ -281,7 +296,9 @@ CREATE TABLE IF NOT EXISTS `item_ledger` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idempotent` (`idempotent_key`),
-  KEY `idx_uid_time` (`uid`, `created_at`)
+  KEY `idx_uid_time` (`uid`, `created_at`),
+  KEY `idx_uid_id` (`uid`, `id`),
+  KEY `idx_item_id` (`item_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO `item_define` (`id`, `name`, `icon`, `kind`, `stackable`, `default_expire_sec`, `tag`, `enabled`)

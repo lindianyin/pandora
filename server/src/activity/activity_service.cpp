@@ -117,7 +117,7 @@ void ActivityService::EnsureSeed() {
 
   const std::vector<ActivityDef> seeds = {
       {0, "sign", "每日签到",
-       "{\"reward_key\":\"daily\",\"reward\":{\"currency\":1,\"amount\":500},\"timezone\":\"Asia/Shanghai\"}", true, "",
+       "{\"reward_key\":\"daily\",\"reward\":{\"currency\":1,\"amount\":500}}", true, "",
        ""},
       {0, "task", "对局任务", "{\"target_games\":3,\"reward_key\":\"games_3\",\"reward\":{\"currency\":2,\"amount\":10}}",
        true, "", ""},

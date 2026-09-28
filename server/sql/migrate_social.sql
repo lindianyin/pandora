@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS `friend_request` (
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_from_to` (`from_uid`, `to_uid`),
-  KEY `idx_to_status` (`to_uid`, `status`)
+  KEY `idx_to_status` (`to_uid`, `status`),
+  KEY `idx_from_status` (`from_uid`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `friendship` (
@@ -43,7 +44,8 @@ CREATE TABLE IF NOT EXISTS `mail` (
   `expire_at` DATETIME(3) NOT NULL,
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  KEY `idx_uid_status` (`to_uid`, `status`, `id`)
+  KEY `idx_uid_status` (`to_uid`, `status`, `id`),
+  KEY `idx_to_uid_id` (`to_uid`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `mail_send_log` (
@@ -69,5 +71,6 @@ CREATE TABLE IF NOT EXISTS `rank_snapshot` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_period_uid` (`period`, `period_key`, `uid`),
-  KEY `idx_period_rank` (`period`, `period_key`, `rank_no`)
+  KEY `idx_period_rank` (`period`, `period_key`, `rank_no`),
+  KEY `idx_period_created` (`period`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

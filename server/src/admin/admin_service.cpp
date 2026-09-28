@@ -430,11 +430,20 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
   };
   std::vector<RoundRow> rounds;
   if (mysql_.Available()) {
-    std::string sql =
-        "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier,"
-        "DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(ended_at,'%Y-%m-%d %H:%i:%s') FROM game_round";
-    if (uid > 0) sql += " WHERE CAST(players_json AS CHAR) LIKE '%" + std::to_string(uid) + "%'";
-    sql += " ORDER BY round_id DESC LIMIT 200";
+    std::string sql;
+    if (uid > 0) {
+      sql =
+          "SELECT g.round_id,g.room_id,g.template_id,CAST(g.players_json AS CHAR),g.base_score,g.multiplier,"
+          "DATE_FORMAT(g.started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(g.ended_at,'%Y-%m-%d %H:%i:%s') "
+          "FROM game_round_player p INNER JOIN game_round g ON g.round_id=p.round_id "
+          "WHERE p.uid=" +
+          std::to_string(uid) + " ORDER BY p.ended_at DESC LIMIT 200";
+    } else {
+      sql =
+          "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier,"
+          "DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(ended_at,'%Y-%m-%d %H:%i:%s') FROM game_round "
+          "ORDER BY ended_at DESC LIMIT 200";
+    }
     auto rows = mysql_.Query(sql);
     if (rows) {
       for (const auto& row : *rows) {
@@ -738,7 +747,7 @@ std::string AdminService::ExportRoundsCsv(int limit) const {
   if (!mysql_.Available()) return oss.str();
   auto rows = mysql_.Query(
       "SELECT round_id,room_id,template_id,base_score,multiplier,CAST(players_json AS CHAR) FROM game_round ORDER BY "
-      "round_id DESC LIMIT " +
+      "ended_at DESC LIMIT " +
       std::to_string(limit));
   if (!rows) return oss.str();
   for (const auto& row : *rows) {
@@ -782,6 +791,22 @@ void AdminService::RecordRound(int64_t round_id, int64_t room_id, int template_i
         "ON DUPLICATE KEY UPDATE ended_at=NOW(3),multiplier=VALUES(multiplier),"
         "players_json=VALUES(players_json)",
         {I64(round_id), I64(room_id), I64(template_id), Str(players_json), I64(base_score), I64(multiplier)});
+
+    mysql_.ExecBind("DELETE FROM game_round_player WHERE round_id=?", {I64(round_id)});
+    try {
+      const auto arr = json::parse(players_json, nullptr, false);
+      if (!arr.is_array()) return;
+      for (const auto& p : arr) {
+        const int64_t puid = p.value("uid", static_cast<int64_t>(0));
+        if (puid <= 0) continue;
+        mysql_.ExecBind(
+            "INSERT INTO game_round_player(round_id,uid,ended_at) VALUES(?,?,NOW(3)) "
+            "ON DUPLICATE KEY UPDATE ended_at=VALUES(ended_at)",
+            {I64(round_id), I64(puid)});
+      }
+    } catch (const std::exception& e) {
+      PLOG_WARN("RecordRound index players err: " << e.what());
+    }
   };
   if (!persist_.Post(job)) job();
 }

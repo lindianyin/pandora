@@ -23,8 +23,7 @@ CREATE TABLE IF NOT EXISTS `bag_item` (
   `expire_at` DATETIME(3) NOT NULL,
   `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_uid_item_expire` (`uid`, `item_id`, `expire_at`),
-  KEY `idx_uid_item` (`uid`, `item_id`)
+  UNIQUE KEY `uk_uid_item_expire` (`uid`, `item_id`, `expire_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `item_ledger` (
@@ -40,7 +39,9 @@ CREATE TABLE IF NOT EXISTS `item_ledger` (
   `created_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_idempotent` (`idempotent_key`),
-  KEY `idx_uid_time` (`uid`, `created_at`)
+  KEY `idx_uid_time` (`uid`, `created_at`),
+  KEY `idx_uid_id` (`uid`, `id`),
+  KEY `idx_item_id` (`item_id`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO `item_define` (`id`, `name`, `icon`, `kind`, `stackable`, `default_expire_sec`, `tag`, `enabled`)
