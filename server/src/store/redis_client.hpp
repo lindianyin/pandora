@@ -1,15 +1,19 @@
 #pragma once
 
-#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
-struct redisContext;
+namespace sw {
+namespace redis {
+class Redis;
+}
+}  // namespace sw
 
 namespace pandora {
 
@@ -42,50 +46,11 @@ class RedisClient {
   std::string LastError() const;
 
  private:
-  struct Slot {
-    redisContext* ctx{nullptr};
-    bool busy{false};
-  };
-
-  struct Borrowed {
-    RedisClient* owner{nullptr};
-    std::size_t index{0};
-    redisContext* ctx{nullptr};
-
-    Borrowed() = default;
-    Borrowed(RedisClient* o, std::size_t i, redisContext* c) : owner(o), index(i), ctx(c) {}
-    Borrowed(const Borrowed&) = delete;
-    Borrowed& operator=(const Borrowed&) = delete;
-    Borrowed(Borrowed&& other) noexcept
-        : owner(other.owner), index(other.index), ctx(other.ctx) {
-      other.owner = nullptr;
-      other.ctx = nullptr;
-    }
-    Borrowed& operator=(Borrowed&& other) noexcept {
-      if (this != &other) {
-        Release();
-        owner = other.owner;
-        index = other.index;
-        ctx = other.ctx;
-        other.owner = nullptr;
-        other.ctx = nullptr;
-      }
-      return *this;
-    }
-    ~Borrowed() { Release(); }
-
-    explicit operator bool() const { return ctx != nullptr; }
-    void Release();
-  };
-
   void ParseUri();
-  redisContext* ConnectOne();
-  void CloseOne(redisContext*& ctx);
-  bool ReconnectSlot(std::size_t index);
-  std::optional<Borrowed> Acquire();
-  void ReleaseIndex(std::size_t index);
+  bool EnsureConnected();
+  std::shared_ptr<sw::redis::Redis> GetRedis();
   void SetError(std::string err) const;
-  bool WithConn(const std::function<bool(redisContext*)>& fn);
+  bool RunWithRetry(const std::function<void(sw::redis::Redis&)>& fn);
 
   std::string uri_;
   std::string host_{"127.0.0.1"};
@@ -94,10 +59,9 @@ class RedisClient {
   int pool_size_{10};
 
   mutable std::mutex mu_;
-  std::condition_variable cv_;
-  std::vector<Slot> slots_;
-  int borrowed_{0};
-  bool stopping_{false};
+  // Serializes pool creation (startup / redis_==nullptr recovery).
+  std::mutex connect_mu_;
+  std::shared_ptr<sw::redis::Redis> redis_;
 };
 
 }  // namespace pandora

@@ -8,6 +8,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(protobuf CONFIG REQUIRED)
 find_package(unofficial-libmysql CONFIG REQUIRED)
 find_package(hiredis CONFIG REQUIRED)
+find_package(redis++ CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(boost_asio CONFIG REQUIRED)
@@ -95,6 +96,7 @@ target_link_libraries(pandora-server PRIVATE
   nlohmann_json::nlohmann_json
   unofficial::libmysql::libmysql
   hiredis::hiredis
+  redis++::redis++
   spdlog::spdlog
   OpenSSL::SSL
   OpenSSL::Crypto
