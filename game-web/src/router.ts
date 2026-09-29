@@ -22,6 +22,17 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/hzmj-table',
+      name: 'hzmj-table',
+      component: () => import('./views/HzmjTableView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/hzmj-lab',
+      name: 'hzmj-lab',
+      component: () => import('./views/HzmjLabView.vue'),
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),

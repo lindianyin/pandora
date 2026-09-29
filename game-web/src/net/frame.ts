@@ -23,6 +23,16 @@ export const MsgId = {
   S2C_DdzReconnect: 2008,
   S2C_ActivityUpdate: 3001,
   S2C_BagUpdate: 5001,
+  S2C_HzmjGameStart: 6001,
+  S2C_HzmjTurn: 6002,
+  S2C_HzmjDraw: 6003,
+  C2S_HzmjDiscard: 6004,
+  S2C_HzmjDiscardBroadcast: 6005,
+  C2S_HzmjAction: 6006,
+  S2C_HzmjActionBroadcast: 6007,
+  S2C_HzmjSettle: 6009,
+  S2C_HzmjLiuJu: 6010,
+  C2S_HzmjGang: 6012,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {
@@ -216,6 +226,8 @@ export type LobbyTemplate = {
   min_gold: number
   max_gold: number
   enabled: boolean
+  game_id: number
+  players: number
 }
 
 function decodeSubMessage(slice: Uint8Array): Record<number, unknown> {
@@ -280,6 +292,8 @@ export function decodeS2C_LobbyInfo(body: Uint8Array): {
           min_gold: asNum(f[4]),
           max_gold: asNum(f[5]),
           enabled: !!asNum(f[6]),
+          game_id: asNum(f[7]) || 1,
+          players: asNum(f[8]) || (asNum(f[7]) === 2 ? 4 : 3),
         })
       }
     } else break
@@ -607,4 +621,313 @@ export function cardLabel(card: number): string {
   const suits = ['♠', '♥', '♣', '♦']
   return suits[Math.floor(card / 13) % 4]! + ranks[card % 13]!
 }
+
+/** Hangzhou mahjong TileId 0..33 */
+export function tileLabel(tile: number): string {
+  if (tile < 0 || tile > 33) return '?'
+  if (tile <= 8) return `${tile + 1}万`
+  if (tile <= 17) return `${tile - 8}条`
+  if (tile <= 26) return `${tile - 17}筒`
+  const winds = ['东', '南', '西', '北']
+  if (tile <= 30) return winds[tile - 27]!
+  const dragons = ['中', '发', '白']
+  return dragons[tile - 31]!
+}
+
+export function encodeC2S_HzmjDiscard(tile: number): Uint8Array {
+  return encodeVarintField(1, tile)
+}
+
+export function encodeC2S_HzmjAction(action: number, chiHand: number[] = []): Uint8Array {
+  const parts: Uint8Array[] = [encodeVarintField(1, action)]
+  for (const t of chiHand) parts.push(encodeVarintField(2, t))
+  return concat(...parts)
+}
+
+export function encodeC2S_HzmjGang(kind: number, tile: number): Uint8Array {
+  return concat(encodeVarintField(1, kind), encodeVarintField(2, tile))
+}
+
+export type HzmjGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  banker_seat: number
+  lian_zhuang: number
+  N: number
+  caishen: number[]
+  self_hand: number[]
+  wall_remain: number
+  self_seat: number
+  base_score: number
+}
+
+export function decodeS2C_HzmjGameStart(body: Uint8Array): HzmjGameStart {
+  let round_id = 0
+  let room_id = 0
+  let template_id = 0
+  let banker_seat = 0
+  let lian_zhuang = 1
+  let N = 2
+  const caishen: number[] = []
+  const self_hand: number[] = []
+  let wall_remain = 0
+  let self_seat = 0
+  let base_score = 100
+  let hasSelfSeat = false
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const v = Number(readVarintBig(body, pos))
+      if (fn === 1) round_id = v
+      if (fn === 2) room_id = v
+      if (fn === 3) template_id = v
+      if (fn === 4) banker_seat = v
+      if (fn === 5) lian_zhuang = v
+      if (fn === 6) N = v
+      if (fn === 7) caishen.push(v)
+      if (fn === 8) self_hand.push(v)
+      if (fn === 9) wall_remain = v
+      if (fn === 10) {
+        self_seat = v
+        hasSelfSeat = true
+      }
+      if (fn === 11) base_score = v
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      const end = pos.i + len
+      if (fn === 7) while (pos.i < end) caishen.push(Number(readVarintBig(body, pos)))
+      else if (fn === 8) while (pos.i < end) self_hand.push(Number(readVarintBig(body, pos)))
+      else pos.i = end
+    } else break
+  }
+  if (!hasSelfSeat) self_seat = 0
+  return {
+    round_id,
+    room_id,
+    template_id,
+    banker_seat,
+    lian_zhuang,
+    N,
+    caishen,
+    self_hand,
+    wall_remain,
+    self_seat,
+    base_score,
+  }
+}
+
+export function decodeS2C_HzmjTurn(body: Uint8Array): {
+  seat_id: number
+  sub: string
+  timeout_s: number
+  wall_remain: number
+  piao_seat: number
+  self_hand: number[]
+} {
+  let seat_id = 0
+  let sub = ''
+  let timeout_s = 0
+  let wall_remain = 0
+  let piao_seat = -1
+  const self_hand: number[] = []
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const raw = readVarintBig(body, pos)
+      const v = Number(raw)
+      if (fn === 1) seat_id = v
+      if (fn === 3) timeout_s = v
+      if (fn === 4) wall_remain = v
+      if (fn === 5) piao_seat = asSigned64(raw)
+      if (fn === 6) self_hand.push(v)
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      const end = pos.i + len
+      if (fn === 2) {
+        sub = new TextDecoder().decode(body.slice(pos.i, end))
+        pos.i = end
+      } else if (fn === 6) {
+        while (pos.i < end) self_hand.push(Number(readVarintBig(body, pos)))
+      } else pos.i = end
+    } else break
+  }
+  return { seat_id, sub, timeout_s, wall_remain, piao_seat, self_hand }
+}
+
+export function decodeS2C_HzmjDraw(body: Uint8Array): { seat_id: number; tile: number } {
+  let seat_id = 0
+  let tile = -1
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const raw = readVarintBig(body, pos)
+      if (fn === 1) seat_id = Number(raw)
+      if (fn === 2) tile = asSigned64(raw)
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      pos.i += len
+    } else break
+  }
+  return { seat_id, tile }
+}
+
+export function decodeS2C_HzmjDiscardBroadcast(body: Uint8Array): { seat_id: number; tile: number } {
+  let seat_id = 0
+  let tile = 0
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const v = Number(readVarintBig(body, pos))
+      if (fn === 1) seat_id = v
+      if (fn === 2) tile = v
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      pos.i += len
+    } else break
+  }
+  return { seat_id, tile }
+}
+
+export function decodeS2C_HzmjActionBroadcast(body: Uint8Array): {
+  seat_id: number
+  action: number
+  tile: number
+  tiles: number[]
+  from_seat: number
+  meld_kind: number
+} {
+  let seat_id = 0
+  let action = 0
+  let tile = 0
+  const tiles: number[] = []
+  let from_seat = -1
+  let meld_kind = 0
+  let hasFrom = false
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const v = Number(readVarintBig(body, pos))
+      if (fn === 1) seat_id = v
+      if (fn === 2) action = v
+      if (fn === 3) tile = v
+      if (fn === 4) tiles.push(v)
+      if (fn === 5) {
+        from_seat = v
+        hasFrom = true
+      }
+      if (fn === 6) meld_kind = v
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      const end = pos.i + len
+      if (fn === 4) while (pos.i < end) tiles.push(Number(readVarintBig(body, pos)))
+      else pos.i = end
+    } else break
+  }
+  if (!hasFrom) from_seat = -1
+  return { seat_id, action, tile, tiles, from_seat, meld_kind }
+}
+
+export type HzmjSettle = {
+  round_id: number
+  winner_seat: number
+  hu_tile: number
+  is_zimo: boolean
+  shooter_seat: number
+  M: number
+  N: number
+  contractor_seat: number
+  base_score: number
+  entries: { uid: number; seat_id: number; delta_gold: number }[]
+}
+
+export function decodeS2C_HzmjSettle(body: Uint8Array): HzmjSettle {
+  let round_id = 0
+  let winner_seat = 0
+  let hu_tile = -1
+  let is_zimo = true
+  let shooter_seat = -1
+  let M = 1
+  let N = 2
+  let contractor_seat = -1
+  let base_score = 100
+  const entries: HzmjSettle['entries'] = []
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const raw = readVarintBig(body, pos)
+      const v = Number(raw)
+      if (fn === 1) round_id = v
+      if (fn === 2) winner_seat = v
+      if (fn === 3) hu_tile = asSigned64(raw)
+      if (fn === 4) is_zimo = !!v
+      if (fn === 5) shooter_seat = asSigned64(raw)
+      if (fn === 6) M = v
+      if (fn === 7) N = v
+      if (fn === 8) contractor_seat = asSigned64(raw)
+      if (fn === 9) base_score = v
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      const slice = body.slice(pos.i, pos.i + len)
+      pos.i += len
+      if (fn === 10) {
+        const f = decodeSubMessage(slice)
+        entries.push({
+          uid: asNum(f[1]),
+          seat_id: asNum(f[2]),
+          delta_gold: asSigned64(f[3] ?? 0),
+        })
+      }
+    } else break
+  }
+  return {
+    round_id,
+    winner_seat,
+    hu_tile,
+    is_zimo,
+    shooter_seat,
+    M,
+    N,
+    contractor_seat,
+    base_score,
+    entries,
+  }
+}
+
+export function decodeS2C_HzmjLiuJu(body: Uint8Array): { lian_zhuang: number } {
+  let lian_zhuang = 1
+  const pos = { i: 0 }
+  while (pos.i < body.length) {
+    const tag = readVarint(body, pos)
+    const fn = tag >>> 3
+    const wt = tag & 7
+    if (wt === 0) {
+      const v = Number(readVarintBig(body, pos))
+      if (fn === 1) lian_zhuang = v
+    } else if (wt === 2) {
+      const len = readVarint(body, pos)
+      pos.i += len
+    } else break
+  }
+  return { lian_zhuang }
+}
+
 

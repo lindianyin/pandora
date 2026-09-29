@@ -1,7 +1,7 @@
 #include "match/match_service.hpp"
 
 #include <algorithm>
-#include <array>
+#include <vector>
 
 #include "common/errors.hpp"
 #include "common/log.hpp"
@@ -23,18 +23,27 @@ void MatchService::RemoveFromQueue(int64_t uid) {
 }
 
 void MatchService::TryMatch(int32_t template_id) {
+  auto tmpl = lobby_.FindTemplate(template_id);
+  if (!tmpl || !tmpl->enabled) return;
+  int need = tmpl->players;
+  if (need <= 0) need = (tmpl->game_id == 2) ? 4 : 3;
+  if (need < 2) need = 2;
+  if (need > 4) need = 4;
+
   auto& q = queues_[template_id];
-  while (q.size() >= 3) {
-    std::array<int64_t, 3> uids{q[0].uid, q[1].uid, q[2].uid};
-    q.erase(q.begin(), q.begin() + 3);
+  while (static_cast<int>(q.size()) >= need) {
+    std::vector<int64_t> uids;
+    uids.reserve(static_cast<size_t>(need));
+    for (int i = 0; i < need; ++i) uids.push_back(q[static_cast<size_t>(i)].uid);
+    q.erase(q.begin(), q.begin() + need);
     for (int64_t u : uids) uid_in_queue_.erase(u);
 
-    const int64_t room_id = rooms_.CreateRoom(template_id, uids);
+    const int64_t room_id = rooms_.CreateRoom(template_id, uids, tmpl->game_id);
     for (int64_t u : uids) {
       hub_.Send(u, MsgId::kS2C_MatchStatus, proto_wire::EncodeS2C_MatchStatus(1, room_id, "matched"));
     }
     rooms_.PushRoomState(room_id);
-    PLOG_INFO("matched room=" << room_id);
+    PLOG_INFO("matched room=" << room_id << " game_id=" << tmpl->game_id << " players=" << need);
   }
 }
 
@@ -115,4 +124,3 @@ void MatchService::Tick() {
 }
 
 }  // namespace pandora
-

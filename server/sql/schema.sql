@@ -243,8 +243,10 @@ CREATE TABLE IF NOT EXISTS `rank_snapshot` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 INSERT INTO `room_template` (`id`, `game_id`, `name`, `base_score`, `rake_bp`, `min_gold`, `max_gold`, `enabled`)
-VALUES (1, 1, '初级场', 100, 500, 1000, 0, 1)
-ON DUPLICATE KEY UPDATE `name`=VALUES(`name`);
+VALUES
+  (1, 1, '初级场', 100, 500, 1000, 0, 1),
+  (2, 2, '杭州麻将初级场', 100, 500, 1000, 0, 1)
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `game_id`=VALUES(`game_id`);
 
 INSERT INTO `pay_product` (`id`, `amount_fen`, `diamond`, `gift_diamond`, `sort`, `enabled`)
 VALUES

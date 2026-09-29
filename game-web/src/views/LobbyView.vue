@@ -42,6 +42,7 @@ onMounted(() => {
       <button class="ghost" @click="router.push('/mail')">邮件</button>
       <button class="ghost" @click="router.push('/rank')">排行</button>
       <button class="ghost" @click="router.push('/bag')">背包</button>
+      <button class="ghost" @click="router.push('/hzmj-lab')">麻将四联调试</button>
     </div>
   </section>
 
@@ -65,7 +66,10 @@ onMounted(() => {
     <div v-for="t in templates" :key="t.id" class="tmpl">
       <div>
         <strong>{{ t.name }}</strong>
-        <span class="meta">底分 {{ t.base_score }} · 金币 [{{ t.min_gold }}, {{ t.max_gold }}]</span>
+        <span class="meta">
+          {{ t.game_id === 2 ? '杭州麻将' : '斗地主' }} · {{ t.players || (t.game_id === 2 ? 4 : 3) }}人
+          · 底分 {{ t.base_score }} · 金币 [{{ t.min_gold }}, {{ t.max_gold }}]
+        </span>
         <span v-if="!t.enabled" class="off">已关闭</span>
       </div>
       <button :disabled="matching || !t.enabled || !wsOk" @click="quickMatch(t.id)">快速匹配</button>

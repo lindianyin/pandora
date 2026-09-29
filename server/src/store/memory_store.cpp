@@ -1,4 +1,4 @@
-﻿#include "store/memory_store.hpp"
+#include "store/memory_store.hpp"
 
 #include <random>
 #include <sstream>
@@ -117,28 +117,31 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
 }
 
 bool MemoryStore::InsertMysqlUser(PlayerRecord& p) {
+  // LoadFromMysqlByOpenId INNER JOINs player_profile — must not use it before profile exists.
   const int r = mysql_.ExecBind("INSERT INTO `user`(account_type,open_id,phone,status) VALUES(1,?,'',?)",
                                 {Str(p.open_id), I64(p.status)});
-  if (r < 0) {
-    auto exist = LoadFromMysqlByOpenId(p.open_id);
-    if (!exist) {
-      PLOG_WARN("InsertMysqlUser fail: " << mysql_.LastError());
-      return false;
-    }
-    p = *exist;
-    return true;
-  }
-  auto loaded = LoadFromMysqlByOpenId(p.open_id);
-  if (!loaded) {
-    PLOG_WARN("InsertMysqlUser: insert ok but select failed open_id=" << p.open_id);
+  auto uid_rows = mysql_.QueryBind(
+      "SELECT uid,status FROM `user` WHERE account_type=1 AND open_id=? LIMIT 1", {Str(p.open_id)});
+  if (!uid_rows || uid_rows->empty()) {
+    PLOG_WARN("InsertMysqlUser: " << (r < 0 ? "insert fail" : "insert ok but select failed")
+                                  << " open_id=" << p.open_id << " err=" << mysql_.LastError());
     return false;
   }
-  p.uid = loaded->uid;
+  p.uid = uid_rows->front().I64("uid");
+  p.status = uid_rows->front().Int("status");
+  if (p.uid <= 0) return false;
   if (p.nickname.empty()) p.nickname = "Player" + std::to_string(p.uid);
-  mysql_.ExecBind(
+  const int pr = mysql_.ExecBind(
       "INSERT INTO player_profile(uid,nickname,avatar,gold,diamond,level) VALUES(?,?,'',?,?,1) "
-      "ON DUPLICATE KEY UPDATE nickname=VALUES(nickname)",
+      "ON DUPLICATE KEY UPDATE nickname=IF(nickname='',VALUES(nickname),nickname)",
       {I64(p.uid), Str(p.nickname), I64(p.gold), I64(p.diamond)});
+  if (pr < 0) {
+    PLOG_WARN("InsertMysqlUser: profile upsert fail uid=" << p.uid << " err=" << mysql_.LastError());
+    return false;
+  }
+  if (auto loaded = LoadFromMysqlByOpenId(p.open_id)) {
+    p = *loaded;
+  }
   return true;
 }
 

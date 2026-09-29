@@ -11,6 +11,9 @@ import {
   encodeC2S_LeaveRoom,
   encodeC2S_DdzBid,
   encodeC2S_DdzPlay,
+  encodeC2S_HzmjDiscard,
+  encodeC2S_HzmjAction,
+  encodeC2S_HzmjGang,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
   decodeS2C_MatchStatus,
@@ -21,10 +24,19 @@ import {
   decodeS2C_DdzPlayBroadcast,
   decodeS2C_DdzSettle,
   decodeS2C_DdzReconnect,
+  decodeS2C_HzmjGameStart,
+  decodeS2C_HzmjTurn,
+  decodeS2C_HzmjDraw,
+  decodeS2C_HzmjDiscardBroadcast,
+  decodeS2C_HzmjActionBroadcast,
+  decodeS2C_HzmjSettle,
+  decodeS2C_HzmjLiuJu,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
   type LobbyTemplate,
   type RoomSeat,
+  type HzmjGameStart,
+  type HzmjSettle,
 } from './frame'
 
 export type GameHandlers = {
@@ -66,9 +78,33 @@ export type GameHandlers = {
     progress_json: string
     claimable: boolean
   }) => void
+  onHzmjGameStart?: (s: HzmjGameStart) => void
+  onHzmjTurn?: (s: {
+    seat_id: number
+    sub: string
+    timeout_s: number
+    wall_remain: number
+    piao_seat: number
+    self_hand: number[]
+  }) => void
+  onHzmjDraw?: (s: { seat_id: number; tile: number }) => void
+  onHzmjDiscard?: (s: { seat_id: number; tile: number }) => void
+  onHzmjAction?: (s: {
+    seat_id: number
+    action: number
+    tile: number
+    tiles: number[]
+    from_seat: number
+    meld_kind: number
+  }) => void
+  onHzmjSettle?: (s: HzmjSettle) => void
+  onHzmjLiuJu?: (s: { lian_zhuang: number }) => void
 }
 
 export class GameSocket {
+  /** Align with server net.heartbeat_interval_s (default 15). */
+  private static readonly HB_INTERVAL_MS = 15_000
+
   private ws: WebSocket | null = null
   private buf = new Uint8Array(0)
   private hbTimer: number | null = null
@@ -87,9 +123,6 @@ export class GameSocket {
     this.ws.onopen = () => {
       this.log('WSS open, sending Auth')
       this.send(MsgId.C2S_Auth, encodeC2S_Auth(token))
-      this.hbTimer = window.setInterval(() => {
-        this.send(MsgId.C2S_Heartbeat, encodeC2S_Heartbeat(Date.now()))
-      }, 15000)
     }
     this.ws.onmessage = (ev) => {
       const chunk = new Uint8Array(ev.data as ArrayBuffer)
@@ -129,11 +162,22 @@ export class GameSocket {
   play(pass: boolean, cards: number[]) {
     this.send(MsgId.C2S_DdzPlay, encodeC2S_DdzPlay(pass, cards))
   }
+  hzmjDiscard(tile: number) {
+    this.send(MsgId.C2S_HzmjDiscard, encodeC2S_HzmjDiscard(tile))
+  }
+  hzmjAction(action: number, chiHand: number[] = []) {
+    this.send(MsgId.C2S_HzmjAction, encodeC2S_HzmjAction(action, chiHand))
+  }
+  hzmjGang(kind: number, tile: number) {
+    this.send(MsgId.C2S_HzmjGang, encodeC2S_HzmjGang(kind, tile))
+  }
 
   private onFrame(msgId: number, body: Uint8Array) {
     if (msgId === MsgId.S2C_AuthResult) {
       const r = decodeS2C_AuthResult(body)
       this.log(`AuthResult code=${r.code} uid=${r.uid}`)
+      if (r.code === 0) this.startHb()
+      else this.stopHb()
       this.handlers.onAuth?.(r.code === 0, r.uid, r.message)
       return
     }
@@ -190,6 +234,41 @@ export class GameSocket {
       this.handlers.onReconnect?.(r)
       return
     }
+    if (msgId === MsgId.S2C_HzmjGameStart) {
+      const r = decodeS2C_HzmjGameStart(body)
+      this.log(`HzmjStart seat=${r.self_seat} hand=${r.self_hand.length} wall=${r.wall_remain}`)
+      this.handlers.onHzmjGameStart?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjTurn) {
+      const r = decodeS2C_HzmjTurn(body)
+      this.handlers.onHzmjTurn?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjDraw) {
+      this.handlers.onHzmjDraw?.(decodeS2C_HzmjDraw(body))
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjDiscardBroadcast) {
+      this.handlers.onHzmjDiscard?.(decodeS2C_HzmjDiscardBroadcast(body))
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjActionBroadcast) {
+      this.handlers.onHzmjAction?.(decodeS2C_HzmjActionBroadcast(body))
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjSettle) {
+      const r = decodeS2C_HzmjSettle(body)
+      this.log(`HzmjSettle M=${r.M} N=${r.N} winner=${r.winner_seat}`)
+      this.handlers.onHzmjSettle?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_HzmjLiuJu) {
+      const r = decodeS2C_HzmjLiuJu(body)
+      this.log(`HzmjLiuJu lian=${r.lian_zhuang}`)
+      this.handlers.onHzmjLiuJu?.(r)
+      return
+    }
     if (msgId === MsgId.S2C_ActivityUpdate) {
       const r = decodeS2C_ActivityUpdate(body)
       this.log(`ActivityUpdate id=${r.activity_id} type=${r.type} claimable=${r.claimable}`)
@@ -208,6 +287,13 @@ export class GameSocket {
   private send(msgId: number, body: Uint8Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return
     this.ws.send(encodeFrame(msgId, body))
+  }
+
+  private startHb() {
+    this.stopHb()
+    const beat = () => this.send(MsgId.C2S_Heartbeat, encodeC2S_Heartbeat(Date.now()))
+    beat()
+    this.hbTimer = window.setInterval(beat, GameSocket.HB_INTERVAL_MS)
   }
 
   private stopHb() {
@@ -229,4 +315,3 @@ export class GameSocket {
     this.handlers.onLog?.(line)
   }
 }
-

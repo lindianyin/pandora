@@ -7,11 +7,12 @@ const { busy, errorBanner, loginAndConnect, checkHealth, logs } = useGameSession
 <template>
   <section class="card">
     <h2>登录</h2>
-    <p class="hint-text">游客登录后自动连接 WSS。三开请用多个窗口（各自独立 sessionStorage）。</p>
+    <p class="hint-text">游客登录后自动连接 WSS。麻将四人联调请用 /hzmj-lab 同页四开。</p>
     <div v-if="errorBanner" class="banner err">{{ errorBanner }}</div>
     <div class="row">
       <button :disabled="busy" @click="loginAndConnect">游客登录并连接</button>
       <button @click="checkHealth">检查 /health</button>
+      <button class="ghost" @click="$router.push('/hzmj-lab')">麻将四联调试</button>
     </div>
   </section>
 
@@ -39,6 +40,7 @@ button {
   cursor: pointer;
 }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.ghost { background: #e2e8f0; color: #334155; }
 .card {
   background: #fff;
   border: 1px solid #e5e7eb;

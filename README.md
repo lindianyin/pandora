@@ -87,6 +87,7 @@ npm run dev
 cd game-web
 npm install
 npm run dev
+npm test          # Vitest：帧编解码 / 鸣牌预判 / 手牌同步
 ```
 
 ## 验收清单

@@ -23,13 +23,10 @@
 
 
 #include "common/config.hpp"
-
 #include "game/ddz_cards.hpp"
-
+#include "game/hzmj/table.hpp"
 #include "net/session_hub.hpp"
-
 #include "store/memory_store.hpp"
-
 #include "wallet/wallet_service.hpp"
 
 namespace pandora {
@@ -153,6 +150,7 @@ class RoomManager {
 
 
 
+  int64_t CreateRoom(int32_t template_id, const std::vector<int64_t>& uids, int32_t game_id = 1);
   int64_t CreateRoom(int32_t template_id, const std::array<int64_t, 3>& uids);
 
   bool SetReady(int64_t uid, bool ready);
@@ -166,6 +164,10 @@ class RoomManager {
   void OnBid(int64_t uid, int score);
 
   void OnPlay(int64_t uid, bool pass, const std::vector<int>& cards);
+
+  void OnHzmjDiscard(int64_t uid, int32_t tile);
+  void OnHzmjAction(int64_t uid, int32_t action, const std::vector<int32_t>& chi_hand);
+  void OnHzmjGang(int64_t uid, int32_t kind, int32_t tile);
 
   void Tick();
 
@@ -209,11 +211,27 @@ class RoomManager {
 
     int32_t template_id{1};
 
-    std::array<Seat, 3> seats{};
+    int32_t game_id{1};
+
+    int seat_count{3};
+
+    std::array<Seat, 4> seats{};
 
     std::string phase{"WaitReady"};
 
     std::unique_ptr<DdzClassicSimple> game;
+
+    std::unique_ptr<hzmj::HzmjTable> hzmj;
+
+    int hzmj_banker{0};
+
+    int hzmj_lian{1};
+
+    int64_t hzmj_round_id{0};
+
+    std::chrono::steady_clock::time_point hzmj_deadline{};
+
+    bool hzmj_done{false};
 
   };
 
@@ -230,6 +248,14 @@ class RoomManager {
   };
 
   void MaybeStart(Room& room);
+  void StartHzmj(Room& room);
+  void OnHzmjEvent(Room& room, const hzmj::OutEvent& ev);
+  void ApplyHzmjSettle(Room& room);
+  void FinishHzmjRound(Room& room);
+  void ArmHzmjDeadline(Room& room);
+  void TickHzmj(Room& room, std::chrono::steady_clock::time_point now);
+  int SeatOfUid(const Room& room, int64_t uid) const;
+  bool GameInProgress(const Room& room) const;
   static std::size_t ShardOf(int64_t room_id) {
     return static_cast<std::size_t>(room_id >= 0 ? room_id : -room_id) % kShards;
   }

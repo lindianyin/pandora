@@ -16,6 +16,8 @@ struct LobbyTemplate {
   int64_t min_gold{0};
   int64_t max_gold{0};
   bool enabled{true};
+  int32_t game_id{1};
+  int32_t players{3};
 };
 
 struct RoomSeat {
@@ -74,6 +76,26 @@ std::vector<uint8_t> EncodeS2C_MailNotify(int64_t mail_id, const std::string& ti
 std::vector<uint8_t> EncodeS2C_FriendNotify(int32_t kind, int64_t from_uid, const std::string& nickname);
 std::vector<uint8_t> EncodeS2C_BagUpdate(int32_t item_id, int64_t quantity, const std::string& expire_at,
                                           int32_t reason);
+
+bool DecodeC2S_HzmjDiscard(const uint8_t* data, size_t len, int32_t& tile);
+bool DecodeC2S_HzmjAction(const uint8_t* data, size_t len, int32_t& action, std::vector<int32_t>& chi_hand);
+bool DecodeC2S_HzmjGang(const uint8_t* data, size_t len, int32_t& kind, int32_t& tile);
+
+std::vector<uint8_t> EncodeS2C_HzmjGameStart(int64_t round_id, int64_t room_id, int32_t template_id, int32_t banker_seat,
+                                             int32_t lian_zhuang, int32_t N, const std::vector<int32_t>& caishen,
+                                             const std::vector<int32_t>& self_hand, int32_t wall_remain,
+                                             int32_t self_seat, int32_t base_score);
+std::vector<uint8_t> EncodeS2C_HzmjTurn(int32_t seat_id, const std::string& sub, int32_t timeout_s, int32_t wall_remain,
+                                        int32_t piao_seat, const std::vector<int32_t>& self_hand = {});
+std::vector<uint8_t> EncodeS2C_HzmjDraw(int32_t seat_id, int32_t tile);
+std::vector<uint8_t> EncodeS2C_HzmjDiscardBroadcast(int32_t seat_id, int32_t tile);
+std::vector<uint8_t> EncodeS2C_HzmjActionBroadcast(int32_t seat_id, int32_t action, int32_t tile,
+                                                   const std::vector<int32_t>& tiles = {}, int32_t from_seat = -1,
+                                                   int32_t meld_kind = 0);
+std::vector<uint8_t> EncodeS2C_HzmjSettle(int64_t round_id, int32_t winner_seat, int32_t hu_tile, bool is_zimo,
+                                          int32_t shooter_seat, int32_t M, int32_t N, int32_t contractor_seat,
+                                          int32_t base_score, const std::vector<SettleEntry>& entries);
+std::vector<uint8_t> EncodeS2C_HzmjLiuJu(int32_t lian_zhuang);
 
 }  // namespace proto_wire
 }  // namespace pandora

@@ -100,6 +100,17 @@ constexpr uint32_t kS2C_MailNotify = 4001;
 constexpr uint32_t kS2C_FriendNotify = 4002;
 
 constexpr uint32_t kS2C_BagUpdate = 5001;
+
+constexpr uint32_t kS2C_HzmjGameStart = 6001;
+constexpr uint32_t kS2C_HzmjTurn = 6002;
+constexpr uint32_t kS2C_HzmjDraw = 6003;
+constexpr uint32_t kC2S_HzmjDiscard = 6004;
+constexpr uint32_t kS2C_HzmjDiscardBroadcast = 6005;
+constexpr uint32_t kC2S_HzmjAction = 6006;
+constexpr uint32_t kS2C_HzmjActionBroadcast = 6007;
+constexpr uint32_t kS2C_HzmjSettle = 6009;
+constexpr uint32_t kS2C_HzmjLiuJu = 6010;
+constexpr uint32_t kC2S_HzmjGang = 6012;
 }  // namespace MsgId
 
 }  // namespace pandora

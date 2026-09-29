@@ -13,6 +13,8 @@ message S2C_LobbyInfo {
     int64 min_gold = 4;
     int64 max_gold = 5;
     bool enabled = 6;
+    int32 game_id = 7;   // 1=ddz 2=hzmj
+    int32 players = 8;   // 3 or 4
   }
   repeated Template templates = 1;
   int64 gold = 2;

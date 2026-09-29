@@ -741,14 +741,15 @@ std::string AdminService::ExportClaimsCsv(int limit) const {
 }
 
 void AdminService::RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json,
-                               int base_score, int multiplier) {
-  auto job = [this, round_id, room_id, template_id, players_json, base_score, multiplier]() {
+                               int base_score, int multiplier, int game_id) {
+  auto job = [this, round_id, room_id, template_id, players_json, base_score, multiplier, game_id]() {
     mysql_.ExecBind(
         "INSERT INTO game_round(round_id,room_id,game_id,template_id,players_json,base_score,multiplier,"
-        "started_at,ended_at) VALUES(?,?,1,?,?,?,?,NOW(3),NOW(3)) "
+        "started_at,ended_at) VALUES(?,?,?,?,?,?,?,NOW(3),NOW(3)) "
         "ON DUPLICATE KEY UPDATE ended_at=NOW(3),multiplier=VALUES(multiplier),"
-        "players_json=VALUES(players_json)",
-        {I64(round_id), I64(room_id), I64(template_id), Str(players_json), I64(base_score), I64(multiplier)});
+        "players_json=VALUES(players_json),game_id=VALUES(game_id)",
+        {I64(round_id), I64(room_id), I64(game_id), I64(template_id), Str(players_json), I64(base_score),
+         I64(multiplier)});
 
     mysql_.ExecBind("DELETE FROM game_round_player WHERE round_id=?", {I64(round_id)});
     try {

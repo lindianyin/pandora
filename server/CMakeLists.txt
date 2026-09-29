@@ -22,6 +22,7 @@ set(PROTO_FILES
   "${PROTO_DIR}/common.proto"
   "${PROTO_DIR}/lobby.proto"
   "${PROTO_DIR}/game_ddz.proto"
+  "${PROTO_DIR}/game_hzmj.proto"
   "${PROTO_DIR}/activity.proto"
   "${PROTO_DIR}/social.proto"
   "${PROTO_DIR}/bag.proto"
@@ -31,6 +32,7 @@ set(GENERATED_SRCS
   "${GENERATED_DIR}/common.pb.cc"
   "${GENERATED_DIR}/lobby.pb.cc"
   "${GENERATED_DIR}/game_ddz.pb.cc"
+  "${GENERATED_DIR}/game_hzmj.pb.cc"
   "${GENERATED_DIR}/activity.pb.cc"
   "${GENERATED_DIR}/social.pb.cc"
   "${GENERATED_DIR}/bag.pb.cc"
@@ -39,6 +41,7 @@ set(GENERATED_HDRS
   "${GENERATED_DIR}/common.pb.h"
   "${GENERATED_DIR}/lobby.pb.h"
   "${GENERATED_DIR}/game_ddz.pb.h"
+  "${GENERATED_DIR}/game_hzmj.pb.h"
   "${GENERATED_DIR}/activity.pb.h"
   "${GENERATED_DIR}/social.pb.h"
   "${GENERATED_DIR}/bag.pb.h"
@@ -82,6 +85,12 @@ add_executable(pandora-server
   src/match/match_service.cpp
   src/room/room_manager.cpp
   src/game/ddz_cards.cpp
+  src/game/hzmj/tiles.cpp
+  src/game/hzmj/meld.cpp
+  src/game/hzmj/hu.cpp
+  src/game/hzmj/score.cpp
+  src/game/hzmj/settle.cpp
+  src/game/hzmj/table.cpp
 )
 
 target_include_directories(pandora-server PRIVATE
@@ -112,6 +121,27 @@ add_executable(ddz_cards_test
   src/game/ddz_cards.cpp
 )
 target_include_directories(ddz_cards_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(hzmj_rules_test
+  tests/hzmj_rules_test.cpp
+  src/game/hzmj/tiles.cpp
+  src/game/hzmj/meld.cpp
+  src/game/hzmj/hu.cpp
+  src/game/hzmj/score.cpp
+  src/game/hzmj/settle.cpp
+)
+target_include_directories(hzmj_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(hzmj_table_test
+  tests/hzmj_table_test.cpp
+  src/game/hzmj/tiles.cpp
+  src/game/hzmj/meld.cpp
+  src/game/hzmj/hu.cpp
+  src/game/hzmj/score.cpp
+  src/game/hzmj/settle.cpp
+  src/game/hzmj/table.cpp
+)
+target_include_directories(hzmj_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_custom_command(TARGET pandora-server POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:pandora-server>/conf

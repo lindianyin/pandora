@@ -98,7 +98,7 @@ class AdminService {
   std::string ExportClaimsCsv(int limit) const;
 
   void RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json, int base_score,
-                   int multiplier);
+                   int multiplier, int game_id = 1);
 
   void Audit(int admin_id, const std::string& action, const std::string& target, const std::string& before,
              const std::string& after);

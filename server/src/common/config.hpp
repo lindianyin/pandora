@@ -29,6 +29,8 @@ struct GameConfig {
   int match_timeout_s{30};
   int64_t min_gold{0};
   int64_t max_gold{100000000};
+  // 本地调试：固定好牌+三牢，庄家打出「东」即可点炮胡
+  bool hzmj_debug_deal{false};
 };
 
 struct ExchangeConfig {

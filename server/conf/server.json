@@ -32,7 +32,8 @@
     "rake_bp": 500,
     "bid_timeout_s": 15,
     "play_timeout_s": 20,
-    "match_timeout_s": 30
+    "match_timeout_s": 30,
+    "hzmj_debug_deal": true
   },
   "exchange": {
     "diamond_to_gold": 1000

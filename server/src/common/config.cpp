@@ -51,6 +51,7 @@ AppConfig LoadConfig(const std::string& path) {
   cfg.game.bid_timeout_s = game.value("bid_timeout_s", cfg.game.bid_timeout_s);
   cfg.game.play_timeout_s = game.value("play_timeout_s", cfg.game.play_timeout_s);
   cfg.game.match_timeout_s = game.value("match_timeout_s", cfg.game.match_timeout_s);
+  cfg.game.hzmj_debug_deal = game.value("hzmj_debug_deal", cfg.game.hzmj_debug_deal);
 
   const auto exchange = root.value("exchange", nlohmann::json::object());
   cfg.exchange.diamond_to_gold = exchange.value("diamond_to_gold", cfg.exchange.diamond_to_gold);
