@@ -8,10 +8,7 @@
     "nlohmann-json",
     "protobuf",
     "libmysql",
-    {
-      "name": "redis-plus-plus",
-      "features": ["cxx17"]
-    },
+    "hiredis",
     "spdlog",
     "openssl"
   ]
