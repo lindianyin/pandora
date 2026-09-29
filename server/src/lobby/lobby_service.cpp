@@ -45,15 +45,15 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
   templates_.clear();
   rake_bp_.clear();
   for (const auto& row : *rows) {
-    if (row.cols.size() < 7) continue;
     proto_wire::LobbyTemplate t;
-    t.id = std::stoi(row.cols[0]);
-    t.name = row.cols[1];
-    t.base_score = std::stoi(row.cols[2]);
-    rake_bp_[t.id] = std::stoi(row.cols[3]);
-    t.min_gold = std::stoll(row.cols[4]);
-    t.max_gold = std::stoll(row.cols[5]);
-    t.enabled = row.cols[6] == "1";
+    t.id = row.Int("id");
+    if (t.id <= 0) continue;
+    t.name = row.Str("name");
+    t.base_score = row.Int("base_score");
+    rake_bp_[t.id] = row.Int("rake_bp");
+    t.min_gold = row.I64("min_gold");
+    t.max_gold = row.I64("max_gold");
+    t.enabled = row.Bool("enabled");
     templates_.push_back(t);
   }
   PLOG_INFO("lobby templates reloaded count=" << templates_.size());

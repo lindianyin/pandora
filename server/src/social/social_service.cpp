@@ -26,14 +26,6 @@ int64_t ParseI64(const std::string& s, int64_t def = 0) {
   }
 }
 
-int ParseInt(const std::string& s, int def = 0) {
-  try {
-    return std::stoi(s);
-  } catch (...) {
-    return def;
-  }
-}
-
 }  // namespace
 
 SocialService::SocialService(MysqlClient& mysql, RedisClient& redis, WalletService& wallet, BagService& bag,
@@ -104,8 +96,9 @@ std::string SocialService::NicknameOf(int64_t uid) const {
   auto p = wallet_.Profile(uid);
   if (p) return p->nickname.empty() ? ("Player" + std::to_string(uid)) : p->nickname;
   auto rows = mysql_.QueryBind("SELECT nickname FROM player_profile WHERE uid=? LIMIT 1", {I64(uid)});
-  if (rows && !rows->empty() && !rows->front().cols.empty() && !rows->front().cols[0].empty()) {
-    return rows->front().cols[0];
+  if (rows && !rows->empty()) {
+    const std::string nick = rows->front().Str("nickname");
+    if (!nick.empty()) return nick;
   }
   
 
@@ -167,16 +160,16 @@ std::string SocialService::SummaryJson(int64_t uid) const {
       "SELECT total_rounds,win_rounds,lose_rounds,landlord_rounds,gold_win_sum,gold_lose_sum "
       "FROM player_stats WHERE uid=? LIMIT 1",
       {I64(uid)});
-  if (rows && !rows->empty() && rows->front().cols.size() >= 6) {
-    const auto& c = rows->front().cols;
-    const int total = ParseInt(c[0]);
-    const int win = ParseInt(c[1]);
+  if (rows && !rows->empty()) {
+    const auto& row = rows->front();
+    const int total = row.Int("total_rounds");
+    const int win = row.Int("win_rounds");
     data["total_rounds"] = total;
     data["win_rounds"] = win;
-    data["lose_rounds"] = ParseInt(c[2]);
-    data["landlord_rounds"] = ParseInt(c[3]);
-    data["gold_win_sum"] = ParseI64(c[4]);
-    data["gold_lose_sum"] = ParseI64(c[5]);
+    data["lose_rounds"] = row.Int("lose_rounds");
+    data["landlord_rounds"] = row.Int("landlord_rounds");
+    data["gold_win_sum"] = row.I64("gold_win_sum");
+    data["gold_lose_sum"] = row.I64("gold_lose_sum");
     data["win_rate_bp"] = total > 0 ? (win * 10000 / total) : 0;
   }
   return data.dump();
@@ -189,20 +182,20 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
   json items = json::array();
   int total = 0;
 
-  auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM game_round_player WHERE uid=?", {I64(uid)});
-  if (cnt && !cnt->empty() && !cnt->front().cols.empty()) total = ParseInt(cnt->front().cols[0]);
+  auto cnt = mysql_.QueryBind("SELECT COUNT(*) AS cnt FROM game_round_player WHERE uid=?", {I64(uid)});
+  if (cnt && !cnt->empty()) total = cnt->front().Int("cnt");
 
   const int64_t offset = static_cast<int64_t>(page - 1) * page_size;
   auto rows = mysql_.QueryBind(
-      "SELECT g.round_id,g.template_id,g.players_json,g.base_score,g.multiplier,g.ended_at "
+      "SELECT g.round_id,g.template_id,CAST(g.players_json AS CHAR) AS players_json,"
+      "g.base_score,g.multiplier,DATE_FORMAT(g.ended_at,'%Y-%m-%d %H:%i:%s') AS ended_at "
       "FROM game_round_player p INNER JOIN game_round g ON g.round_id=p.round_id "
       "WHERE p.uid=? ORDER BY p.ended_at DESC LIMIT ? OFFSET ?",
       {I64(uid), I64(page_size), I64(offset)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 6) continue;
       try {
-        const auto arr = json::parse(row.cols[2], nullptr, false);
+        const auto arr = json::parse(row.Str("players_json"), nullptr, false);
         if (!arr.is_array()) continue;
         for (const auto& p : arr) {
           if (p.value("uid", static_cast<int64_t>(0)) != uid) continue;
@@ -210,11 +203,11 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
           std::string result = "draw";
           if (delta > 0) result = "win";
           else if (delta < 0) result = "lose";
-          items.push_back({{"round_id", ParseI64(row.cols[0])},
-                           {"template_id", ParseInt(row.cols[1])},
-                           {"ended_at", row.cols[5]},
-                           {"base_score", ParseInt(row.cols[3])},
-                           {"multiplier", ParseInt(row.cols[4])},
+          items.push_back({{"round_id", row.I64("round_id")},
+                           {"template_id", row.Int("template_id")},
+                           {"ended_at", row.Str("ended_at")},
+                           {"base_score", row.Int("base_score")},
+                           {"multiplier", row.Int("multiplier")},
                            {"delta_gold", delta},
                            {"is_landlord", p.value("is_landlord", false)},
                            {"result", result}});
@@ -229,14 +222,14 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
 
 int SocialService::FriendCount(int64_t uid) const {
   auto rows = mysql_.QueryBind(
-      "SELECT COUNT(*) FROM ("
+      "SELECT COUNT(*) AS cnt FROM ("
       "  SELECT uid_high AS fuid FROM friendship WHERE uid_low=?"
       "  UNION ALL"
       "  SELECT uid_low AS fuid FROM friendship WHERE uid_high=?"
       ") t",
       {I64(uid), I64(uid)});
-  if (!rows || rows->empty() || rows->front().cols.empty()) return 0;
-  return ParseInt(rows->front().cols[0]);
+  if (!rows || rows->empty()) return 0;
+  return rows->front().Int("cnt");
 }
 
 bool SocialService::AreFriends(int64_t a, int64_t b) const {
@@ -265,8 +258,8 @@ std::string SocialService::FriendListJson(int64_t uid) const {
       {I64(uid), I64(uid)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.empty()) continue;
-      const int64_t fuid = ParseI64(row.cols[0]);
+      const int64_t fuid = row.I64("fuid");
+      if (fuid <= 0) continue;
       items.push_back({{"uid", fuid}, {"nickname", NicknameOf(fuid)}, {"online", hub_.IsOnline(fuid)}});
     }
   }
@@ -277,29 +270,29 @@ std::string SocialService::FriendPendingJson(int64_t uid) const {
   json incoming = json::array();
   json outgoing = json::array();
   auto in_rows = mysql_.QueryBind(
-      "SELECT id,from_uid,created_at FROM friend_request WHERE to_uid=? AND status=0 ORDER BY id DESC LIMIT 100",
+      "SELECT id,from_uid,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at "
+      "FROM friend_request WHERE to_uid=? AND status=0 ORDER BY id DESC LIMIT 100",
       {I64(uid)});
   if (in_rows) {
     for (const auto& row : *in_rows) {
-      if (row.cols.size() < 3) continue;
-      const int64_t from = ParseI64(row.cols[1]);
-      incoming.push_back({{"id", ParseI64(row.cols[0])},
+      const int64_t from = row.I64("from_uid");
+      incoming.push_back({{"id", row.I64("id")},
                           {"from_uid", from},
                           {"nickname", NicknameOf(from)},
-                          {"created_at", row.cols[2]}});
+                          {"created_at", row.Str("created_at")}});
     }
   }
   auto out_rows = mysql_.QueryBind(
-      "SELECT id,to_uid,created_at FROM friend_request WHERE from_uid=? AND status=0 ORDER BY id DESC LIMIT 100",
+      "SELECT id,to_uid,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at "
+      "FROM friend_request WHERE from_uid=? AND status=0 ORDER BY id DESC LIMIT 100",
       {I64(uid)});
   if (out_rows) {
     for (const auto& row : *out_rows) {
-      if (row.cols.size() < 3) continue;
-      const int64_t to = ParseI64(row.cols[1]);
-      outgoing.push_back({{"id", ParseI64(row.cols[0])},
+      const int64_t to = row.I64("to_uid");
+      outgoing.push_back({{"id", row.I64("id")},
                           {"to_uid", to},
                           {"nickname", NicknameOf(to)},
-                          {"created_at", row.cols[2]}});
+                          {"created_at", row.Str("created_at")}});
     }
   }
   return json{{"incoming", incoming}, {"outgoing", outgoing}}.dump();
@@ -398,7 +391,7 @@ void SocialService::InsertMailForUid(int64_t uid, const std::string& title, cons
       {I64(uid), Str(title), Str(body), Str(attach), I64(days)});
   int64_t mail_id = 0;
   auto rows = mysql_.QueryBind("SELECT id FROM mail WHERE to_uid=? ORDER BY id DESC LIMIT 1", {I64(uid)});
-  if (rows && !rows->empty()) mail_id = ParseI64(rows->front().cols[0]);
+  if (rows && !rows->empty()) mail_id = rows->front().I64("id");
   bool has_attach = false;
   try {
     const auto j = json::parse(attach, nullptr, false);
@@ -411,25 +404,26 @@ void SocialService::InsertMailForUid(int64_t uid, const std::string& title, cons
 std::string SocialService::MailListJson(int64_t uid) const {
   json items = json::array();
   auto rows = mysql_.QueryBind(
-      "SELECT id,title,body,attach_json,status,expire_at,created_at FROM mail "
+      "SELECT id,title,body,CAST(attach_json AS CHAR) AS attach_json,status,"
+      "DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s') AS expire_at,"
+      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at FROM mail "
       "WHERE to_uid=? AND status IN (0,1,2) AND expire_at>NOW(3) ORDER BY id DESC LIMIT 100",
       {I64(uid)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 7) continue;
       json attach = json::object();
       try {
-        attach = json::parse(row.cols[3], nullptr, false);
+        attach = json::parse(row.Str("attach_json"), nullptr, false);
         if (!attach.is_object()) attach = json::object();
       } catch (...) {
       }
-      items.push_back({{"id", ParseI64(row.cols[0])},
-                       {"title", row.cols[1]},
-                       {"body", row.cols[2]},
+      items.push_back({{"id", row.I64("id")},
+                       {"title", row.Str("title")},
+                       {"body", row.Str("body")},
                        {"attach_json", attach},
-                       {"status", ParseInt(row.cols[4])},
-                       {"expire_at", row.cols[5]},
-                       {"created_at", row.cols[6]}});
+                       {"status", row.Int("status")},
+                       {"expire_at", row.Str("expire_at")},
+                       {"created_at", row.Str("created_at")}});
     }
   }
   return json{{"items", items}}.dump();
@@ -449,13 +443,15 @@ bool SocialService::MailRead(int64_t uid, int64_t mail_id, std::string* err) {
 SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
   SocialOpResult r;
   auto rows = mysql_.QueryBind(
-      "SELECT attach_json,status,expire_at FROM mail WHERE id=? AND to_uid=? AND status IN (0,1,2) LIMIT 1",
+      "SELECT CAST(attach_json AS CHAR) AS attach_json,status,expire_at FROM mail "
+      "WHERE id=? AND to_uid=? AND status IN (0,1,2) LIMIT 1",
       {I64(mail_id), I64(uid)});
-  if (!rows || rows->empty() || rows->front().cols.size() < 3) {
+  if (!rows || rows->empty()) {
     r.error = "mail not found";
     return r;
   }
-  const int status = ParseInt(rows->front().cols[1]);
+  const auto& mail = rows->front();
+  const int status = mail.Int("status");
   if (status == 2) {
     r.error = "already claimed";
     return r;
@@ -472,7 +468,7 @@ SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
   int64_t amount = 0;
   json items = json::array();
   try {
-    const auto attach = json::parse(rows->front().cols[0], nullptr, false);
+    const auto attach = json::parse(mail.Str("attach_json"), nullptr, false);
     if (attach.is_object()) {
       currency = attach.value("currency", 1);
       amount = attach.value("amount", static_cast<int64_t>(0));
@@ -541,7 +537,8 @@ bool SocialService::AdminSendMail(int admin_id, const std::string& scope, const 
     targets.clear();
     if (rows) {
       for (const auto& row : *rows) {
-        if (!row.cols.empty()) targets.push_back(ParseI64(row.cols[0]));
+        const int64_t tuid = row.I64("uid");
+        if (tuid > 0) targets.push_back(tuid);
       }
     }
   } else {
@@ -576,35 +573,35 @@ std::string SocialService::AdminMailLogJson(int page, int page_size) const {
   if (page_size > 100) page_size = 100;
   json items = json::array();
   int total = 0;
-  auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM mail_send_log", {});
-  if (cnt && !cnt->empty()) total = ParseInt(cnt->front().cols[0]);
+  auto cnt = mysql_.QueryBind("SELECT COUNT(*) AS cnt FROM mail_send_log", {});
+  if (cnt && !cnt->empty()) total = cnt->front().Int("cnt");
   const int64_t offset = static_cast<int64_t>(page - 1) * page_size;
   auto rows = mysql_.QueryBind(
-      "SELECT id,admin_id,scope,target_json,title,body,attach_json,"
-      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM mail_send_log "
+      "SELECT id,admin_id,scope,CAST(target_json AS CHAR) AS target_json,title,body,"
+      "CAST(attach_json AS CHAR) AS attach_json,"
+      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at FROM mail_send_log "
       "ORDER BY id DESC LIMIT ? OFFSET ?",
       {I64(page_size), I64(offset)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 8) continue;
       json target = json::object();
       json attach = json::object();
       try {
-        target = json::parse(row.cols[3], nullptr, false);
+        target = json::parse(row.Str("target_json"), nullptr, false);
       } catch (...) {
       }
       try {
-        attach = json::parse(row.cols[6], nullptr, false);
+        attach = json::parse(row.Str("attach_json"), nullptr, false);
       } catch (...) {
       }
-      items.push_back({{"id", ParseI64(row.cols[0])},
-                       {"admin_id", ParseInt(row.cols[1])},
-                       {"scope", row.cols[2]},
+      items.push_back({{"id", row.I64("id")},
+                       {"admin_id", row.Int("admin_id")},
+                       {"scope", row.Str("scope")},
                        {"target_json", target},
-                       {"title", row.cols[4]},
-                       {"body", row.cols[5]},
+                       {"title", row.Str("title")},
+                       {"body", row.Str("body")},
                        {"attach_json", attach},
-                       {"created_at", row.cols[7]}});
+                       {"created_at", row.Str("created_at")}});
     }
   }
   return json{{"items", items}, {"total", total}, {"page", page}, {"page_size", page_size}}.dump();
@@ -660,12 +657,13 @@ std::string SocialService::RankJson(int64_t uid, const std::string& period, int 
     int rank = 1;
     if (rows) {
       for (const auto& row : *rows) {
-        if (row.cols.size() < 3) continue;
-        const int64_t ruid = ParseI64(row.cols[0]);
-        const int64_t score = ParseI64(row.cols[1]);
+        const int64_t ruid = row.I64("uid");
+        if (ruid <= 0) continue;
+        const int64_t score = row.I64("gold");
+        const std::string nick = row.Str("nickname");
         list.push_back({{"rank", rank},
                         {"uid", ruid},
-                        {"nickname", row.cols[2].empty() ? ("Player" + row.cols[0]) : row.cols[2]},
+                        {"nickname", nick.empty() ? ("Player" + std::to_string(ruid)) : nick},
                         {"score", score}});
         if (ruid == uid) {
           me["rank"] = rank;
@@ -705,8 +703,9 @@ bool SocialService::SnapshotRank(const std::string& period, std::string* err) {
                                  {I64(top_n)});
     if (rows) {
       for (const auto& row : *rows) {
-        if (row.cols.size() < 2) continue;
-        entries.emplace_back(ParseI64(row.cols[0]), ParseI64(row.cols[1]));
+        const int64_t ruid = row.I64("uid");
+        if (ruid <= 0) continue;
+        entries.emplace_back(ruid, row.I64("gold"));
       }
     }
   }
@@ -732,23 +731,23 @@ std::string SocialService::AdminRankSnapshotJson(const std::string& period, int 
   std::string period_key;
   auto keys = mysql_.QueryBind(
       "SELECT period_key FROM rank_snapshot WHERE period=? ORDER BY created_at DESC LIMIT 1", {Str(use_period)});
-  if (keys && !keys->empty()) period_key = keys->front().cols[0];
+  if (keys && !keys->empty()) period_key = keys->front().Str("period_key");
   else period_key = PeriodKeyOf(use_period);
 
   const int64_t offset = static_cast<int64_t>(page - 1) * page_size;
   auto rows = mysql_.QueryBind(
-      "SELECT uid,score,rank_no,created_at FROM rank_snapshot WHERE period=? AND period_key=? "
+      "SELECT uid,score,rank_no,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at "
+      "FROM rank_snapshot WHERE period=? AND period_key=? "
       "ORDER BY rank_no ASC LIMIT ? OFFSET ?",
       {Str(use_period), Str(period_key), I64(page_size), I64(offset)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 4) continue;
-      const int64_t ruid = ParseI64(row.cols[0]);
+      const int64_t ruid = row.I64("uid");
       items.push_back({{"uid", ruid},
                        {"nickname", NicknameOf(ruid)},
-                       {"score", ParseI64(row.cols[1])},
-                       {"rank_no", ParseInt(row.cols[2])},
-                       {"created_at", row.cols[3]}});
+                       {"score", row.I64("score")},
+                       {"rank_no", row.Int("rank_no")},
+                       {"created_at", row.Str("created_at")}});
     }
   }
   return json{{"period", use_period}, {"period_key", period_key}, {"items", items}, {"page", page}, {"page_size", page_size}}

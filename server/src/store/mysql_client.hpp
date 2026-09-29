@@ -4,17 +4,99 @@
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct MYSQL;
 
 namespace pandora {
 
+// Shared column metadata for one result set (names + name→index).
+struct MysqlFieldMeta {
+  std::vector<std::string> names;
+  std::unordered_map<std::string, std::size_t> index;
+};
+
 struct MysqlRow {
   std::vector<std::string> cols;
+  // Parallel to cols: 1 = SQL NULL (cols[i] is empty).
+  std::vector<uint8_t> nulls;
+  std::shared_ptr<const MysqlFieldMeta> meta;
+
+  std::size_t size() const { return cols.size(); }
+  bool empty() const { return cols.empty(); }
+
+  std::optional<std::size_t> IndexOf(const std::string& name) const {
+    if (!meta) return std::nullopt;
+    const auto it = meta->index.find(name);
+    if (it == meta->index.end()) return std::nullopt;
+    return it->second;
+  }
+
+  bool IsNull(std::size_t i) const { return i >= nulls.size() || nulls[i] != 0; }
+  bool IsNull(const std::string& name) const {
+    const auto i = IndexOf(name);
+    return !i || IsNull(*i);
+  }
+
+  const std::string& Str(std::size_t i) const {
+    static const std::string kEmpty;
+    return i < cols.size() ? cols[i] : kEmpty;
+  }
+  const std::string& Str(const std::string& name) const {
+    const auto i = IndexOf(name);
+    if (!i) {
+      static const std::string kEmpty;
+      return kEmpty;
+    }
+    return Str(*i);
+  }
+
+  int64_t I64(std::size_t i, int64_t def = 0) const { return ParseI64(Str(i), def); }
+  int64_t I64(const std::string& name, int64_t def = 0) const {
+    const auto i = IndexOf(name);
+    return i ? I64(*i, def) : def;
+  }
+
+  int Int(std::size_t i, int def = 0) const { return ParseInt(Str(i), def); }
+  int Int(const std::string& name, int def = 0) const {
+    const auto i = IndexOf(name);
+    return i ? Int(*i, def) : def;
+  }
+
+  // MySQL tinyint/bool style: "1" / "true" / "TRUE" / "yes".
+  bool Bool(std::size_t i, bool def = false) const { return ParseBool(Str(i), def); }
+  bool Bool(const std::string& name, bool def = false) const {
+    const auto i = IndexOf(name);
+    return i ? Bool(*i, def) : def;
+  }
+
+ private:
+  static int64_t ParseI64(const std::string& s, int64_t def) {
+    if (s.empty()) return def;
+    try {
+      return std::stoll(s);
+    } catch (...) {
+      return def;
+    }
+  }
+  static int ParseInt(const std::string& s, int def) {
+    if (s.empty()) return def;
+    try {
+      return std::stoi(s);
+    } catch (...) {
+      return def;
+    }
+  }
+  static bool ParseBool(const std::string& s, bool def) {
+    if (s.empty()) return def;
+    return s == "1" || s == "true" || s == "TRUE" || s == "yes" || s == "YES";
+  }
 };
 
 // Bound SQL argument for prepared statements.

@@ -164,8 +164,10 @@ MYSQL* MysqlClient::ConnectOne() {
     SetError("mysql_init failed");
     return nullptr;
   }
+  // Connect: fail fast if MySQL is down. R/W: allow lock waits / heavier queries
+  // without treating them as dead connections (1s was too aggressive).
   unsigned int connect_timeout = 2;
-  unsigned int rw_timeout = 1;
+  unsigned int rw_timeout = 5;
   mysql_options(m, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout);
   mysql_options(m, MYSQL_OPT_READ_TIMEOUT, &rw_timeout);
   mysql_options(m, MYSQL_OPT_WRITE_TIMEOUT, &rw_timeout);
@@ -325,12 +327,32 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryOn(Borrowed& b, const std
     return std::nullopt;
   }
   const unsigned cols = mysql_num_fields(res);
+  MYSQL_FIELD* fields = mysql_fetch_fields(res);
+  auto meta = std::make_shared<MysqlFieldMeta>();
+  meta->names.resize(cols);
+  for (unsigned i = 0; i < cols; ++i) {
+    meta->names[i] = (fields && fields[i].name) ? fields[i].name : "";
+    if (!meta->names[i].empty()) meta->index.emplace(meta->names[i], i);
+  }
+
   std::vector<MysqlRow> rows;
   MYSQL_ROW row;
   while ((row = mysql_fetch_row(res)) != nullptr) {
+    const unsigned long* lengths = mysql_fetch_lengths(res);
     MysqlRow r;
+    r.meta = meta;
     r.cols.resize(cols);
-    for (unsigned i = 0; i < cols; ++i) r.cols[i] = row[i] ? row[i] : "";
+    r.nulls.assign(cols, 0);
+    for (unsigned i = 0; i < cols; ++i) {
+      if (!row[i]) {
+        r.nulls[i] = 1;
+        r.cols[i].clear();
+      } else if (lengths) {
+        r.cols[i].assign(row[i], lengths[i]);
+      } else {
+        r.cols[i] = row[i];
+      }
+    }
     rows.push_back(std::move(r));
   }
   mysql_free_result(res);
@@ -437,6 +459,13 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryBindOn(Borrowed& b, const
   const unsigned cols = mysql_num_fields(meta);
   MYSQL_FIELD* fields = mysql_fetch_fields(meta);
 
+  auto field_meta = std::make_shared<MysqlFieldMeta>();
+  field_meta->names.resize(cols);
+  for (unsigned i = 0; i < cols; ++i) {
+    field_meta->names[i] = (fields && fields[i].name) ? fields[i].name : "";
+    if (!field_meta->names[i].empty()) field_meta->index.emplace(field_meta->names[i], i);
+  }
+
   std::vector<MYSQL_BIND> out_binds(cols);
   std::vector<std::vector<char>> buffers(cols);
   std::vector<unsigned long> col_lens(cols);
@@ -477,9 +506,12 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryBindOn(Borrowed& b, const
       return std::nullopt;
     }
     MysqlRow row;
+    row.meta = field_meta;
     row.cols.resize(cols);
+    row.nulls.assign(cols, 0);
     for (unsigned i = 0; i < cols; ++i) {
       if (null_flags[i]) {
+        row.nulls[i] = 1;
         row.cols[i].clear();
         continue;
       }

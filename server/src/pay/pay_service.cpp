@@ -52,20 +52,20 @@ std::vector<PayProduct> PayService::ListProducts(bool include_disabled) const {
 
 void PayService::ReloadFromDb(MysqlClient& mysql) {
   auto rows =
-      mysql.Query("SELECT id,amount_fen,diamond,gift_diamond,IFNULL(gift_items_json,'[]'),enabled FROM pay_product "
-                  "ORDER BY sort,id");
+      mysql.Query("SELECT id,amount_fen,diamond,gift_diamond,IFNULL(gift_items_json,'[]') AS gift_items_json,enabled "
+                  "FROM pay_product ORDER BY sort,id");
   if (!rows || rows->empty()) return;
   std::lock_guard<std::mutex> lk(mu_);
   products_.clear();
   for (const auto& row : *rows) {
-    if (row.cols.size() < 6) continue;
     PayProduct p;
-    p.id = std::stoi(row.cols[0]);
-    p.amount_fen = std::stoi(row.cols[1]);
-    p.diamond = std::stoi(row.cols[2]);
-    p.gift_diamond = std::stoi(row.cols[3]);
-    p.gift_items_json = NormalizeGiftItems(row.cols[4]);
-    p.enabled = row.cols[5] == "1";
+    p.id = row.Int("id");
+    if (p.id <= 0) continue;
+    p.amount_fen = row.Int("amount_fen");
+    p.diamond = row.Int("diamond");
+    p.gift_diamond = row.Int("gift_diamond");
+    p.gift_items_json = NormalizeGiftItems(row.Str("gift_items_json"));
+    p.enabled = row.Bool("enabled");
     products_.push_back(p);
   }
 }
@@ -95,38 +95,29 @@ std::string PayService::LoadGiftItemsJson(int product_id) const {
       if (p.id == product_id) return p.gift_items_json.empty() ? "[]" : p.gift_items_json;
     }
   }
-  auto rows = mysql_.QueryBind("SELECT IFNULL(gift_items_json,'[]') FROM pay_product WHERE id=? LIMIT 1",
+  auto rows = mysql_.QueryBind("SELECT IFNULL(gift_items_json,'[]') AS gift_items_json FROM pay_product WHERE id=? LIMIT 1",
                                {I64(product_id)});
   if (!rows || rows->empty()) return "[]";
-  return NormalizeGiftItems(rows->front().cols[0]);
+  return NormalizeGiftItems(rows->front().Str("gift_items_json"));
 }
 
 std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
   auto rows = mysql_.QueryBind(
       "SELECT order_id,uid,product_id,amount_fen,status,alipay_trade_no,"
-      "(SELECT diamond+gift_diamond FROM pay_product WHERE id=pay_order.product_id LIMIT 1) "
+      "(SELECT diamond+gift_diamond FROM pay_product WHERE id=pay_order.product_id LIMIT 1) AS diamond "
       "FROM pay_order WHERE order_id=? LIMIT 1",
       {Str(order_id)});
-  if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
-  const auto& c = rows->front().cols;
+  if (!rows || rows->empty()) return std::nullopt;
+  const auto& r = rows->front();
   PayOrder o;
-  o.order_id = c[0];
-  try {
-    o.uid = std::stoll(c[1]);
-    o.product_id = std::stoi(c[2]);
-    o.amount_fen = std::stoi(c[3]);
-    o.status = std::stoi(c[4]);
-  } catch (...) {
-    return std::nullopt;
-  }
-  o.alipay_trade_no = c[5];
-  if (c.size() >= 7 && !c[6].empty()) {
-    try {
-      o.diamond = std::stoi(c[6]);
-    } catch (...) {
-      o.diamond = 0;
-    }
-  }
+  o.order_id = r.Str("order_id");
+  if (o.order_id.empty()) return std::nullopt;
+  o.uid = r.I64("uid");
+  o.product_id = r.Int("product_id");
+  o.amount_fen = r.Int("amount_fen");
+  o.status = r.Int("status");
+  o.alipay_trade_no = r.Str("alipay_trade_no");
+  o.diamond = r.Int("diamond");
   if (o.diamond <= 0) {
     std::lock_guard<std::mutex> lk(mu_);
     for (const auto& p : products_) {
@@ -143,25 +134,21 @@ std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
   std::vector<PayOrder> out;
   auto rows = mysql_.QueryBind(
       "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,o.alipay_trade_no,"
-      "p.diamond+p.gift_diamond,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') FROM pay_order o "
-      "INNER JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
+      "p.diamond+p.gift_diamond AS diamond,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS created_at "
+      "FROM pay_order o INNER JOIN pay_product p ON p.id=o.product_id ORDER BY o.created_at DESC LIMIT ?",
       {I64(static_cast<int64_t>(limit))});
   if (!rows) return out;
   for (const auto& row : *rows) {
-    if (row.cols.size() < 8) continue;
     PayOrder o;
-    o.order_id = row.cols[0];
-    try {
-      o.uid = std::stoll(row.cols[1]);
-      o.product_id = std::stoi(row.cols[2]);
-      o.amount_fen = std::stoi(row.cols[3]);
-      o.status = std::stoi(row.cols[4]);
-      o.diamond = std::stoi(row.cols[6]);
-    } catch (...) {
-      continue;
-    }
-    o.alipay_trade_no = row.cols[5];
-    o.created_at = row.cols[7];
+    o.order_id = row.Str("order_id");
+    if (o.order_id.empty()) continue;
+    o.uid = row.I64("uid");
+    o.product_id = row.Int("product_id");
+    o.amount_fen = row.Int("amount_fen");
+    o.status = row.Int("status");
+    o.alipay_trade_no = row.Str("alipay_trade_no");
+    o.diamond = row.Int("diamond");
+    o.created_at = row.Str("created_at");
     out.push_back(o);
   }
   return out;

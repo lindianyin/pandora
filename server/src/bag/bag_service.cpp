@@ -75,16 +75,16 @@ void BagService::ReloadDefs() {
       "SELECT id,name,icon,kind,stackable,default_expire_sec,tag,enabled FROM item_define ORDER BY id");
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 8) continue;
       ItemDef d;
-      d.id = ParseInt(row.cols[0]);
-      d.name = row.cols[1];
-      d.icon = row.cols[2];
-      d.kind = row.cols[3];
-      d.stackable = row.cols[4] == "1";
-      d.default_expire_sec = ParseInt(row.cols[5]);
-      d.tag = row.cols[6];
-      d.enabled = row.cols[7] == "1";
+      d.id = row.Int("id");
+      if (d.id <= 0) continue;
+      d.name = row.Str("name");
+      d.icon = row.Str("icon");
+      d.kind = row.Str("kind");
+      d.stackable = row.Bool("stackable");
+      d.default_expire_sec = row.Int("default_expire_sec");
+      d.tag = row.Str("tag");
+      d.enabled = row.Bool("enabled");
       loaded.push_back(std::move(d));
     }
   }
@@ -203,7 +203,7 @@ std::string BagService::ListDefsJson(bool include_disabled) const {
 std::string BagService::ListBagJson(int64_t uid, bool include_expired) const {
   json items = json::array();
   std::string sql =
-      "SELECT b.item_id,b.quantity,DATE_FORMAT(b.expire_at,'%Y-%m-%d %H:%i:%s'),"
+      "SELECT b.item_id,b.quantity,DATE_FORMAT(b.expire_at,'%Y-%m-%d %H:%i:%s') AS expire_at,"
       "d.name,d.kind,d.icon,d.tag FROM bag_item b "
       "INNER JOIN item_define d ON d.id=b.item_id WHERE b.uid=? AND b.quantity>0";
   if (!include_expired) sql += " AND b.expire_at>NOW(3)";
@@ -211,14 +211,13 @@ std::string BagService::ListBagJson(int64_t uid, bool include_expired) const {
   auto rows = mysql_.QueryBind(sql, {I64(uid)});
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 7) continue;
-      items.push_back({{"item_id", ParseInt(row.cols[0])},
-                       {"quantity", ParseI64(row.cols[1])},
-                       {"expire_at", TrimExpireDisplay(row.cols[2])},
-                       {"name", row.cols[3]},
-                       {"kind", row.cols[4]},
-                       {"icon", row.cols[5]},
-                       {"tag", row.cols[6]}});
+      items.push_back({{"item_id", row.Int("item_id")},
+                       {"quantity", row.I64("quantity")},
+                       {"expire_at", TrimExpireDisplay(row.Str("expire_at"))},
+                       {"name", row.Str("name")},
+                       {"kind", row.Str("kind")},
+                       {"icon", row.Str("icon")},
+                       {"tag", row.Str("tag")}});
     }
   }
   return json{{"items", items}}.dump();
@@ -241,30 +240,31 @@ std::string BagService::ListLedgersJson(int64_t uid, int item_id, int page, int 
     where += " AND item_id=?";
     binds.push_back(I64(item_id));
   }
-  auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM item_ledger" + where, binds);
-  if (cnt && !cnt->empty()) total = ParseInt(cnt->front().cols[0]);
+  auto cnt = mysql_.QueryBind("SELECT COUNT(*) AS cnt FROM item_ledger" + where, binds);
+  if (cnt && !cnt->empty()) total = cnt->front().Int("cnt");
 
   const int64_t offset = static_cast<int64_t>(page - 1) * page_size;
   binds.push_back(I64(page_size));
   binds.push_back(I64(offset));
   auto rows = mysql_.QueryBind(
-      "SELECT id,uid,item_id,delta,quantity_after,DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s'),"
-      "biz_type,idempotent_key,ref_id,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM item_ledger" +
+      "SELECT id,uid,item_id,delta,quantity_after,"
+      "DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s') AS expire_at,"
+      "biz_type,idempotent_key,ref_id,"
+      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS created_at FROM item_ledger" +
           where + " ORDER BY id DESC LIMIT ? OFFSET ?",
       binds);
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 10) continue;
-      items.push_back({{"id", ParseI64(row.cols[0])},
-                       {"uid", ParseI64(row.cols[1])},
-                       {"item_id", ParseInt(row.cols[2])},
-                       {"delta", ParseI64(row.cols[3])},
-                       {"quantity_after", ParseI64(row.cols[4])},
-                       {"expire_at", TrimExpireDisplay(row.cols[5])},
-                       {"biz_type", row.cols[6]},
-                       {"idempotent_key", row.cols[7]},
-                       {"ref_id", row.cols[8]},
-                       {"created_at", TrimExpireDisplay(row.cols[9])}});
+      items.push_back({{"id", row.I64("id")},
+                       {"uid", row.I64("uid")},
+                       {"item_id", row.Int("item_id")},
+                       {"delta", row.I64("delta")},
+                       {"quantity_after", row.I64("quantity_after")},
+                       {"expire_at", TrimExpireDisplay(row.Str("expire_at"))},
+                       {"biz_type", row.Str("biz_type")},
+                       {"idempotent_key", row.Str("idempotent_key")},
+                       {"ref_id", row.Str("ref_id")},
+                       {"created_at", TrimExpireDisplay(row.Str("created_at"))}});
     }
   }
   return json{{"items", items}, {"total", total}}.dump();
@@ -282,7 +282,7 @@ BagOpResult BagService::GrantTtl(int64_t uid, int item_id, int64_t quantity, con
       "SELECT id FROM bag_item WHERE uid=? AND item_id=? ORDER BY "
       "(expire_at>NOW(3)) DESC, expire_at DESC LIMIT 1",
       {I64(uid), I64(item_id)});
-  if (any && !any->empty()) keep_id = ParseI64(any->front().cols[0]);
+  if (any && !any->empty()) keep_id = any->front().I64("id");
 
   int up = -1;
   if (policy.mode == ExpirePolicy::Mode::kAbsolute && !policy.absolute.empty()) {
@@ -327,16 +327,16 @@ BagOpResult BagService::GrantTtl(int64_t uid, int item_id, int64_t quantity, con
   }
 
   auto keep = mysql_.QueryBind(
-      "SELECT id, DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s.%f') FROM bag_item "
+      "SELECT id, DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s.%f') AS expire_at FROM bag_item "
       "WHERE uid=? AND item_id=? ORDER BY expire_at DESC LIMIT 1",
       {I64(uid), I64(item_id)});
-  if (!keep || keep->empty() || keep->front().cols.size() < 2) {
+  if (!keep || keep->empty()) {
     r.error = "ttl grant missing row";
     r.err_code = static_cast<int>(Err::kInternal);
     return r;
   }
-  keep_id = ParseI64(keep->front().cols[0]);
-  const std::string new_expire = keep->front().cols[1];
+  keep_id = keep->front().I64("id");
+  const std::string new_expire = keep->front().Str("expire_at");
   mysql_.ExecBind("DELETE FROM bag_item WHERE uid=? AND item_id=? AND id<>?",
                   {I64(uid), I64(item_id), I64(keep_id)});
 
@@ -392,8 +392,8 @@ BagOpResult BagService::Grant(int64_t uid, int item_id, int64_t quantity, const 
 
   // Cap rows per uid (soft)
   if (cfg_.max_rows_per_uid > 0) {
-    auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM bag_item WHERE uid=? AND quantity>0", {I64(uid)});
-    if (cnt && !cnt->empty() && ParseInt(cnt->front().cols[0]) >= cfg_.max_rows_per_uid) {
+    auto cnt = mysql_.QueryBind("SELECT COUNT(*) AS cnt FROM bag_item WHERE uid=? AND quantity>0", {I64(uid)});
+    if (cnt && !cnt->empty() && cnt->front().Int("cnt") >= cfg_.max_rows_per_uid) {
       // still allow stacking onto existing rows
       auto exist = mysql_.QueryBind(
           "SELECT id FROM bag_item WHERE uid=? AND item_id=? AND expire_at=? LIMIT 1",
@@ -419,7 +419,7 @@ BagOpResult BagService::Grant(int64_t uid, int item_id, int64_t quantity, const 
       "SELECT quantity FROM bag_item WHERE uid=? AND item_id=? AND expire_at=? LIMIT 1",
       {I64(uid), I64(item_id), Str(expire_at)});
   int64_t after = quantity;
-  if (qrows && !qrows->empty()) after = ParseI64(qrows->front().cols[0]);
+  if (qrows && !qrows->empty()) after = qrows->front().I64("quantity");
 
   const int lr = mysql_.ExecBind(
       "INSERT INTO item_ledger(uid,item_id,delta,quantity_after,expire_at,biz_type,idempotent_key,ref_id,created_at) "
@@ -467,7 +467,7 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
 
   // FIFO: earliest expire first among non-expired
   std::string sql =
-      "SELECT id,quantity,DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s.%f') FROM bag_item "
+      "SELECT id,quantity,DATE_FORMAT(expire_at,'%Y-%m-%d %H:%i:%s.%f') AS expire_at FROM bag_item "
       "WHERE uid=? AND item_id=? AND quantity>0 AND expire_at>NOW(3)";
   std::vector<SqlArg> binds{I64(uid), I64(item_id)};
   if (!prefer_expire_at.empty()) {
@@ -481,8 +481,9 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
   if (!rows || rows->empty()) {
     // distinguish expired-only vs none
     auto any = mysql_.QueryBind(
-        "SELECT SUM(quantity) FROM bag_item WHERE uid=? AND item_id=? AND quantity>0", {I64(uid), I64(item_id)});
-    const int64_t total = (any && !any->empty()) ? ParseI64(any->front().cols[0]) : 0;
+        "SELECT COALESCE(SUM(quantity),0) AS total FROM bag_item WHERE uid=? AND item_id=? AND quantity>0",
+        {I64(uid), I64(item_id)});
+    const int64_t total = (any && !any->empty()) ? any->front().I64("total") : 0;
     if (total > 0) {
       r.error = "item expired";
       r.err_code = static_cast<int>(Err::kItemExpired);
@@ -493,9 +494,7 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
     return r;
   }
   int64_t usable = 0;
-  for (const auto& row : *rows) {
-    if (row.cols.size() >= 2) usable += ParseI64(row.cols[1]);
-  }
+  for (const auto& row : *rows) usable += row.I64("quantity");
   if (usable < quantity) {
     r.error = "insufficient item";
     r.err_code = static_cast<int>(Err::kItemInsufficient);
@@ -507,10 +506,9 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
   std::string last_expire;
   for (const auto& row : *rows) {
     if (need <= 0) break;
-    if (row.cols.size() < 3) continue;
-    const int64_t row_id = ParseI64(row.cols[0]);
-    const int64_t have = ParseI64(row.cols[1]);
-    const std::string exp = row.cols[2];
+    const int64_t row_id = row.I64("id");
+    const int64_t have = row.I64("quantity");
+    const std::string exp = row.Str("expire_at");
     const int64_t take = have < need ? have : need;
     const int64_t left = have - take;
     if (left <= 0) {
@@ -552,10 +550,11 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
 
 int64_t BagService::GetQuantity(int64_t uid, int item_id) const {
   auto rows = mysql_.QueryBind(
-      "SELECT COALESCE(SUM(quantity),0) FROM bag_item WHERE uid=? AND item_id=? AND quantity>0 AND expire_at>NOW(3)",
+      "SELECT COALESCE(SUM(quantity),0) AS qty FROM bag_item WHERE uid=? AND item_id=? AND quantity>0 AND "
+      "expire_at>NOW(3)",
       {I64(uid), I64(item_id)});
   if (!rows || rows->empty()) return 0;
-  return ParseI64(rows->front().cols[0]);
+  return rows->front().I64("qty");
 }
 
 bool BagService::GrantItemsFromJson(int64_t uid, const std::string& items_json_array, const std::string& parent_idem,

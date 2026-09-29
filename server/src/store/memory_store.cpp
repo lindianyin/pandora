@@ -82,19 +82,17 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByOpenId(const std::string
       "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
       "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid WHERE u.account_type=1 AND u.open_id=? LIMIT 1",
       {Str(open_id)});
-  if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
-  const auto& c = rows->front().cols;
+  if (!rows || rows->empty()) return std::nullopt;
+  const auto& r = rows->front();
   PlayerRecord p;
-  try {
-    p.uid = std::stoll(c[0]);
-    p.open_id = c[1];
-    p.status = std::stoi(c[2]);
-    p.nickname = c[3].empty() ? ("Player" + c[0]) : c[3];
-    p.gold = std::stoll(c[4]);
-    p.diamond = std::stoll(c[5]);
-  } catch (...) {
-    return std::nullopt;
-  }
+  p.uid = r.I64("uid");
+  p.open_id = r.Str("open_id");
+  p.status = r.Int("status");
+  p.nickname = r.Str("nickname");
+  if (p.nickname.empty()) p.nickname = "Player" + std::to_string(p.uid);
+  p.gold = r.I64("gold");
+  p.diamond = r.I64("diamond");
+  if (p.uid <= 0) return std::nullopt;
   return p;
 }
 
@@ -104,19 +102,17 @@ std::optional<PlayerRecord> MemoryStore::LoadFromMysqlByUid(int64_t uid) {
       "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond "
       "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid WHERE u.uid=? LIMIT 1",
       {I64(uid)});
-  if (!rows || rows->empty() || rows->front().cols.size() < 6) return std::nullopt;
-  const auto& c = rows->front().cols;
+  if (!rows || rows->empty()) return std::nullopt;
+  const auto& r = rows->front();
   PlayerRecord p;
-  try {
-    p.uid = std::stoll(c[0]);
-    p.open_id = c[1];
-    p.status = std::stoi(c[2]);
-    p.nickname = c[3].empty() ? ("Player" + c[0]) : c[3];
-    p.gold = std::stoll(c[4]);
-    p.diamond = std::stoll(c[5]);
-  } catch (...) {
-    return std::nullopt;
-  }
+  p.uid = r.I64("uid");
+  p.open_id = r.Str("open_id");
+  p.status = r.Int("status");
+  p.nickname = r.Str("nickname");
+  if (p.nickname.empty()) p.nickname = "Player" + std::to_string(p.uid);
+  p.gold = r.I64("gold");
+  p.diamond = r.I64("diamond");
+  if (p.uid <= 0) return std::nullopt;
   return p;
 }
 
@@ -268,12 +264,10 @@ size_t MemoryStore::SessionCount() {
 }
 
 size_t MemoryStore::PlayerCount() {
-  auto rows = mysql_.Query("SELECT COUNT(*) FROM `user`");
-  if (rows && !rows->empty() && !rows->front().cols.empty()) {
-    try {
-      return static_cast<size_t>(std::stoll(rows->front().cols[0]));
-    } catch (...) {
-    }
+  auto rows = mysql_.Query("SELECT COUNT(*) AS cnt FROM `user`");
+  if (rows && !rows->empty()) {
+    const int64_t n = rows->front().I64("cnt");
+    if (n >= 0) return static_cast<size_t>(n);
   }
   
 
@@ -316,18 +310,14 @@ std::vector<PlayerRecord> MemoryStore::ListPlayers(size_t limit) {
   std::vector<PlayerRecord> out;
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 6) continue;
       PlayerRecord p;
-      try {
-        p.uid = std::stoll(row.cols[0]);
-        p.open_id = row.cols[1];
-        p.status = std::stoi(row.cols[2]);
-        p.nickname = row.cols[3];
-        p.gold = std::stoll(row.cols[4]);
-        p.diamond = std::stoll(row.cols[5]);
-      } catch (...) {
-        continue;
-      }
+      p.uid = row.I64("uid");
+      if (p.uid <= 0) continue;
+      p.open_id = row.Str("open_id");
+      p.status = row.Int("status");
+      p.nickname = row.Str("nickname");
+      p.gold = row.I64("gold");
+      p.diamond = row.I64("diamond");
       out.push_back(p);
     }
   }
@@ -404,20 +394,16 @@ std::vector<LedgerEntry> MemoryStore::RecentLedgers(int64_t uid, size_t limit) {
   std::vector<LedgerEntry> out;
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 8) continue;
       LedgerEntry e;
-      try {
-        e.id = std::stoll(row.cols[0]);
-        e.uid = std::stoll(row.cols[1]);
-        e.currency = std::stoi(row.cols[2]);
-        e.delta = std::stoll(row.cols[3]);
-        e.balance_after = std::stoll(row.cols[4]);
-        e.biz_type = row.cols[5];
-        e.idempotent_key = row.cols[6];
-        e.ref_id = row.cols[7];
-      } catch (...) {
-        continue;
-      }
+      e.id = row.I64("id");
+      if (e.id <= 0) continue;
+      e.uid = row.I64("uid");
+      e.currency = row.Int("currency");
+      e.delta = row.I64("delta");
+      e.balance_after = row.I64("balance_after");
+      e.biz_type = row.Str("biz_type");
+      e.idempotent_key = row.Str("idempotent_key");
+      e.ref_id = row.Str("ref_id");
       out.push_back(e);
     }
   }

@@ -105,7 +105,6 @@ class AdminService {
 
  private:
   std::string HashPassword(const std::string& password) const;
-  std::string Escape(const std::string& s) const;
   std::string MakeToken() const;
   std::optional<AdminSession> LoadSessionFromRedis(const std::string& token) const;
 

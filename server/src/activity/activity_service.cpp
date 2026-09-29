@@ -143,22 +143,23 @@ void ActivityService::Bootstrap() {
 void ActivityService::Reload() {
   std::vector<ActivityDef> loaded;
   auto rows = mysql_.Query(
-      "SELECT id,type,title,CAST(rules_json AS CHAR),DATE_FORMAT(start_at,'%Y-%m-%d %H:%i:%s.%f'),"
-      "DATE_FORMAT(end_at,'%Y-%m-%d %H:%i:%s.%f'),enabled FROM activity_define ORDER BY id");
+      "SELECT id,type,title,CAST(rules_json AS CHAR) AS rules_json,"
+      "DATE_FORMAT(start_at,'%Y-%m-%d %H:%i:%s.%f') AS start_at,"
+      "DATE_FORMAT(end_at,'%Y-%m-%d %H:%i:%s.%f') AS end_at,enabled FROM activity_define ORDER BY id");
   if (rows) {
     for (const auto& row : *rows) {
-      if (row.cols.size() < 7) continue;
       ActivityDef d;
-      d.id = std::stoi(row.cols[0]);
-      d.type = row.cols[1];
-      d.title = row.cols[2];
-      d.rules_json = row.cols[3];
-      d.start_at = row.cols[4];
-      d.end_at = row.cols[5];
+      d.id = row.Int("id");
+      if (d.id <= 0) continue;
+      d.type = row.Str("type");
+      d.title = row.Str("title");
+      d.rules_json = row.Str("rules_json");
+      d.start_at = row.Str("start_at");
+      d.end_at = row.Str("end_at");
       // 哨兵时间对外视为空窗
       if (d.start_at.rfind("1970-01-01", 0) == 0) d.start_at.clear();
       if (d.end_at.rfind("9999-12-31", 0) == 0) d.end_at.clear();
-      d.enabled = row.cols[6] == "1";
+      d.enabled = row.Bool("enabled");
       loaded.push_back(d);
     }
   }
@@ -239,13 +240,8 @@ bool ActivityService::SetEnabled(int id, bool enabled, std::string* err) {
 }
 
 int ActivityService::ClaimCount(int activity_id) const {
-  auto rows = mysql_.QueryBind("SELECT COUNT(*) FROM activity_claim WHERE activity_id=?", {I64(activity_id)});
-  if (rows && !rows->empty() && !rows->front().cols.empty()) {
-    try {
-      return std::stoi(rows->front().cols[0]);
-    } catch (...) {
-    }
-  }
+  auto rows = mysql_.QueryBind("SELECT COUNT(*) AS cnt FROM activity_claim WHERE activity_id=?", {I64(activity_id)});
+  if (rows && !rows->empty()) return rows->front().Int("cnt");
   return 0;
 }
 
@@ -256,10 +252,10 @@ std::string ActivityService::LoadProgress(int64_t uid, int aid) {
   
 
   auto rows = mysql_.QueryBind(
-      "SELECT CAST(progress_json AS CHAR) FROM activity_progress WHERE activity_id=? AND uid=? LIMIT 1",
+      "SELECT CAST(progress_json AS CHAR) AS progress_json FROM activity_progress WHERE activity_id=? AND uid=? LIMIT 1",
       {I64(aid), I64(uid)});
-  if (rows && !rows->empty() && !rows->front().cols.empty()) {
-    const auto& json = rows->front().cols[0];
+  if (rows && !rows->empty()) {
+    const auto& json = rows->front().Str("progress_json");
     redis_.Set("act:prog:" + mk, json, 86400);
     return json;
   }
@@ -323,13 +319,10 @@ int ActivityService::ReadStock(int aid) const {
   
 
   auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
-  if (rows && !rows->empty() && !rows->front().cols.empty()) {
-    try {
-      const int n = std::stoi(rows->front().cols[0]);
-      redis_.Set(rkey, std::to_string(n));
-      return n;
-    } catch (...) {
-    }
+  if (rows && !rows->empty()) {
+    const int n = rows->front().Int("remain");
+    redis_.Set(rkey, std::to_string(n));
+    return n;
   }
   
 
@@ -345,13 +338,7 @@ bool ActivityService::DecrStock(int aid, int& remain) {
   if (r > 0) {
     auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
     remain = 0;
-    if (rows && !rows->empty() && !rows->front().cols.empty()) {
-      try {
-        remain = std::stoi(rows->front().cols[0]);
-      } catch (...) {
-        remain = 0;
-      }
-    }
+    if (rows && !rows->empty()) remain = rows->front().Int("remain");
     redis_.Set(rkey, std::to_string(remain));
     return true;
   }
