@@ -295,7 +295,6 @@ int MysqlClient::ExecOn(Borrowed& b, const std::string& sql) {
 int MysqlClient::Exec(const std::string& sql) {
   auto b = Acquire();
   if (!b) return -1;
-  if (!EnsureAlive(*b)) return -1;
 
   int n = ExecOn(*b, sql);
   if (n >= 0) {
@@ -351,7 +350,6 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryOn(Borrowed& b, const std
 std::optional<std::vector<MysqlRow>> MysqlClient::Query(const std::string& sql) {
   auto b = Acquire();
   if (!b) return std::nullopt;
-  if (!EnsureAlive(*b)) return std::nullopt;
 
   auto rows = QueryOn(*b, sql);
   if (rows) {
@@ -530,7 +528,6 @@ int MysqlClient::ExecBind(const std::string& sql, std::initializer_list<SqlArg> 
 int MysqlClient::ExecBind(const std::string& sql, const std::vector<SqlArg>& args) {
   auto b = Acquire();
   if (!b) return -1;
-  if (!EnsureAlive(*b)) return -1;
 
   int n = ExecBindOn(*b, sql, args);
   if (n >= 0) {
@@ -563,7 +560,6 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryBind(const std::string& s
 std::optional<std::vector<MysqlRow>> MysqlClient::QueryBind(const std::string& sql, const std::vector<SqlArg>& args) {
   auto b = Acquire();
   if (!b) return std::nullopt;
-  if (!EnsureAlive(*b)) return std::nullopt;
 
   auto rows = QueryBindOn(*b, sql, args);
   if (rows) {

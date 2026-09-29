@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import ItemSelect from '../components/ItemSelect.vue'
 
 type GiftItem = { item_id: number; quantity: number; expire_sec: number }
 
@@ -46,7 +47,7 @@ function formatGifts(row: any): string {
 }
 
 function addGiftRow() {
-  form.value.gift_items.push({ item_id: 1001, quantity: 1, expire_sec: 0 })
+  form.value.gift_items.push({ item_id: 0, quantity: 1, expire_sec: 0 })
 }
 
 function removeGiftRow(i: number) {
@@ -65,6 +66,10 @@ function search() {
 
 async function save() {
   const gift_items = form.value.gift_items.filter((x) => x.item_id > 0 && x.quantity > 0)
+  if (form.value.gift_items.length && gift_items.length !== form.value.gift_items.length) {
+    ElMessage.warning('请为每一行选择有效道具，或删除空行')
+    return
+  }
   const r = await api.upsertProduct({
     id: form.value.id,
     amount_fen: form.value.amount_fen,
@@ -117,18 +122,24 @@ onMounted(load)
     <el-form-item label="上架"><el-switch v-model="form.enabled" /></el-form-item>
     <el-button type="primary" @click="save">保存</el-button>
   </el-form>
-  <div style="margin-bottom: 16px">
-    <div style="margin-bottom: 8px; color: #64748b">赠送道具（可空）</div>
-    <div v-for="(row, i) in form.gift_items" :key="i" style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center">
-      <span>道具ID</span>
-      <el-input-number v-model="row.item_id" :min="1" />
-      <span>数量</span>
-      <el-input-number v-model="row.quantity" :min="1" />
-      <span>expire_sec</span>
-      <el-input-number v-model="row.expire_sec" :min="0" />
-      <el-button size="small" @click="removeGiftRow(i)">删</el-button>
+  <div class="gift-block">
+    <div class="gift-title">赠送道具（可空）</div>
+    <div v-if="form.gift_items.length" class="items-panel">
+      <div class="items-head">
+        <span>道具</span>
+        <span>数量</span>
+        <span>过期秒数</span>
+        <span>操作</span>
+      </div>
+      <div v-for="(row, i) in form.gift_items" :key="i" class="items-row">
+        <ItemSelect v-model="row.item_id" placeholder="选择道具" />
+        <el-input-number v-model="row.quantity" :min="1" controls-position="right" />
+        <el-input-number v-model="row.expire_sec" :min="0" controls-position="right" />
+        <el-button size="small" @click="removeGiftRow(i)">删除</el-button>
+      </div>
+      <p class="items-hint">过期秒数填 0 表示用道具定义默认时长。</p>
     </div>
-    <el-button size="small" @click="addGiftRow">加赠送道具</el-button>
+    <el-button size="small" type="primary" plain @click="addGiftRow">添加赠送道具</el-button>
   </div>
 
   <div class="admin-filter">
@@ -150,6 +161,7 @@ onMounted(load)
         <el-option value="on" label="已上架" />
         <el-option value="off" label="已下架" />
       </el-select>
+      <span class="admin-filter-tip">&nbsp;</span>
     </div>
     <div class="admin-filter-actions">
       <el-button type="primary" @click="search">查询</el-button>
@@ -188,3 +200,44 @@ onMounted(load)
     :page-sizes="[10, 20, 50]"
   />
 </template>
+
+<style scoped>
+.gift-block {
+  margin-bottom: 16px;
+  max-width: 860px;
+}
+.gift-title {
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+.items-panel {
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.items-head,
+.items-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(120px, 0.9fr) minmax(140px, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.items-head {
+  color: #64748b;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.items-row :deep(.el-input-number),
+.items-row :deep(.el-select) {
+  width: 100%;
+}
+.items-hint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+}
+</style>

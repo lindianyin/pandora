@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import ItemSelect from '../components/ItemSelect.vue'
 
 type Kind = 'qty' | 'qty_ttl' | 'ttl'
 
@@ -25,7 +26,7 @@ const form = ref({
 
 const grantForm = ref({
   uid: 0,
-  item_id: 1001,
+  item_id: 0,
   quantity: 1,
   expire_sec: 0,
   idempotent_key: '',
@@ -34,7 +35,7 @@ const grantForm = ref({
 const bagUid = ref(0)
 const bagItems = ref<any[]>([])
 const ledgerUid = ref(0)
-const ledgerItemId = ref(0)
+const ledgerItemId = ref<number | undefined>(undefined)
 const ledgerItems = ref<any[]>([])
 const ledgerTotal = ref(0)
 const ledgerPage = ref(1)
@@ -316,7 +317,9 @@ onMounted(load)
   <p style="color: #64748b; font-size: 13px; margin-top: -4px">{{ grantHint() }}</p>
   <el-form :inline="true" :model="grantForm">
     <el-form-item label="UID"><el-input-number v-model="grantForm.uid" :min="1" /></el-form-item>
-    <el-form-item label="道具ID"><el-input-number v-model="grantForm.item_id" :min="1" /></el-form-item>
+    <el-form-item label="道具">
+      <ItemSelect v-model="grantForm.item_id" width="240px" placeholder="选择道具" />
+    </el-form-item>
     <el-form-item :label="grantKind === 'ttl' ? '续期份数' : '数量'">
       <el-input-number v-model="grantForm.quantity" :min="1" />
     </el-form-item>
@@ -366,14 +369,14 @@ onMounted(load)
       <span class="admin-filter-tip">填 0 或不改则查全部玩家</span>
     </div>
     <div class="admin-filter-field">
-      <label>道具 ID</label>
-      <el-input-number
+      <label>道具</label>
+      <ItemSelect
         v-model="ledgerItemId"
-        :min="0"
-        controls-position="right"
-        placeholder="0 表示不限"
+        clearable
+        include-disabled
+        placeholder="全部道具"
       />
-      <span class="admin-filter-tip">填 0 则不按道具过滤</span>
+      <span class="admin-filter-tip">不选则不按道具过滤</span>
     </div>
     <div class="admin-filter-actions">
       <el-button
@@ -390,7 +393,7 @@ onMounted(load)
         @click="
           () => {
             ledgerUid = 0
-            ledgerItemId = 0
+            ledgerItemId = undefined
             ledgerPage = 1
             loadLedgers()
           }

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import ItemSelect from '../components/ItemSelect.vue'
 import { fmtTime } from '../utils'
 
 type GiftItem = { item_id: number; quantity: number; expire_sec: number }
@@ -20,7 +21,6 @@ type RulesForm = {
 }
 
 const allItems = ref<any[]>([])
-const itemDefs = ref<any[]>([])
 const q = ref('')
 const page = ref(1)
 const pageSize = ref(20)
@@ -43,7 +43,7 @@ function defaultRules(type: string): RulesForm {
     currency: 1,
     amount: type === 'gift' ? 2000 : type === 'task' ? 10 : 500,
     with_items: false,
-    items: [{ item_id: 1001, quantity: 1, expire_sec: 0 }],
+    items: [{ item_id: 0, quantity: 1, expire_sec: 0 }],
     target_games: 3,
     stock: 100,
     price_currency: 2,
@@ -105,7 +105,7 @@ function parseRules(raw: unknown): RulesForm {
     currency,
     amount: amount > 0 ? amount : 500,
     with_items: itemRows.length > 0,
-    items: itemRows.length ? itemRows : [{ item_id: 1001, quantity: 1, expire_sec: 0 }],
+    items: itemRows.length ? itemRows : [{ item_id: 0, quantity: 1, expire_sec: 0 }],
     target_games: Number(obj.target_games) || 3,
     stock: Number(obj.stock) || 100,
     price_currency: Number(price.currency) || 2,
@@ -171,17 +171,12 @@ function rewardSummary(row: any): string {
 }
 
 function addItemRow() {
-  rules.value.items.push({ item_id: 1001, quantity: 1, expire_sec: 0 })
+  rules.value.items.push({ item_id: 0, quantity: 1, expire_sec: 0 })
 }
 
 function removeItemRow(i: number) {
   rules.value.items.splice(i, 1)
-  if (!rules.value.items.length) rules.value.items.push({ item_id: 1001, quantity: 1, expire_sec: 0 })
-}
-
-async function loadItemDefs() {
-  const r = await api.items()
-  if (r.code === 0) itemDefs.value = (r.data.items || []).filter((x: any) => x.enabled)
+  if (!rules.value.items.length) rules.value.items.push({ item_id: 0, quantity: 1, expire_sec: 0 })
 }
 
 async function load() {
@@ -246,15 +241,12 @@ async function setEnabled(row: any, enabled: boolean) {
   load()
 }
 
-onMounted(async () => {
-  await loadItemDefs()
-  await load()
-})
+onMounted(load)
 </script>
 
 <template>
   <h2>活动管理</h2>
-  <el-form :model="form" label-width="110px" style="max-width: 760px; margin-bottom: 20px">
+  <el-form :model="form" label-width="110px" style="max-width: 860px; margin-bottom: 20px">
     <el-form-item label="ID(0=新建)"><el-input-number v-model="form.id" /></el-form-item>
     <el-form-item label="类型">
       <el-select v-model="form.type" style="width: 180px">
@@ -291,48 +283,46 @@ onMounted(async () => {
     </template>
 
     <el-form-item label="货币奖励">
-      <el-switch v-model="rules.with_currency" active-text="发放" inactive-text="无" />
-      <template v-if="rules.with_currency">
-        <el-select v-model="rules.currency" style="width: 110px; margin-left: 12px">
-          <el-option :value="1" label="金币" />
-          <el-option :value="2" label="钻石" />
-        </el-select>
-        <el-input-number v-model="rules.amount" :min="1" style="margin-left: 8px" />
-      </template>
+      <div class="attach-row">
+        <el-switch v-model="rules.with_currency" active-text="发放" inactive-text="无" />
+        <template v-if="rules.with_currency">
+          <el-select v-model="rules.currency" class="field-currency">
+            <el-option :value="1" label="金币" />
+            <el-option :value="2" label="钻石" />
+          </el-select>
+          <el-input-number v-model="rules.amount" :min="1" class="field-amount" controls-position="right" />
+        </template>
+      </div>
     </el-form-item>
 
     <el-form-item label="道具奖励">
-      <el-switch v-model="rules.with_items" active-text="发放" inactive-text="无" />
-      <div v-if="rules.with_items" style="width: 100%; margin-top: 8px">
-        <div
-          v-for="(row, i) in rules.items"
-          :key="i"
-          style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; align-items: center"
-        >
-          <el-select
-            v-model="row.item_id"
-            filterable
-            allow-create
-            default-first-option
-            style="width: 220px"
-            placeholder="道具"
-          >
-            <el-option
-              v-for="d in itemDefs"
-              :key="d.id"
-              :value="d.id"
-              :label="`${d.id} ${d.name} (${d.kind})`"
+      <div class="items-attach">
+        <el-switch v-model="rules.with_items" active-text="发放" inactive-text="无" />
+        <div v-if="rules.with_items" class="items-panel">
+          <div class="items-head">
+            <span class="col-item">道具</span>
+            <span class="col-qty">数量</span>
+            <span class="col-exp">过期秒数</span>
+            <span class="col-act">操作</span>
+          </div>
+          <div v-for="(row, i) in rules.items" :key="i" class="items-row">
+            <ItemSelect v-model="row.item_id" class="col-item" placeholder="选择道具" />
+            <el-input-number
+              v-model="row.quantity"
+              :min="1"
+              class="col-qty"
+              controls-position="right"
             />
-          </el-select>
-          <span>数量</span>
-          <el-input-number v-model="row.quantity" :min="1" />
-          <span>expire_sec</span>
-          <el-input-number v-model="row.expire_sec" :min="0" />
-          <el-button size="small" @click="removeItemRow(i)">删</el-button>
-        </div>
-        <el-button size="small" @click="addItemRow">加一条道具</el-button>
-        <div class="hint" style="display: block; margin: 6px 0 0; margin-left: 0">
-          expire_sec=0 用道具默认时长；ttl 为续期单份秒数
+            <el-input-number
+              v-model="row.expire_sec"
+              :min="0"
+              class="col-exp"
+              controls-position="right"
+            />
+            <el-button class="col-act" size="small" @click="removeItemRow(i)">删除</el-button>
+          </div>
+          <p class="items-hint">过期秒数填 0 表示用道具定义默认时长；ttl 类型为本次续期的单份秒数。</p>
+          <el-button size="small" type="primary" plain @click="addItemRow">添加一行道具</el-button>
         </div>
       </div>
     </el-form-item>
@@ -415,5 +405,53 @@ onMounted(async () => {
   margin-left: 10px;
   color: #94a3b8;
   font-size: 12px;
+}
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+.field-currency {
+  width: 140px;
+}
+.field-amount {
+  width: 160px;
+}
+.items-attach {
+  width: 100%;
+}
+.items-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+  width: 100%;
+  box-sizing: border-box;
+}
+.items-head,
+.items-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(120px, 0.9fr) minmax(140px, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.items-head {
+  color: #64748b;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.items-row :deep(.el-input-number),
+.items-row :deep(.el-select) {
+  width: 100%;
+}
+.items-hint {
+  margin: 0 0 10px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>

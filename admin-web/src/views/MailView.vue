@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { fmtTime } from '../utils'
+import ItemSelect from '../components/ItemSelect.vue'
 
 type GiftItem = { item_id: number; quantity: number; expire_sec: number }
 
@@ -14,7 +15,7 @@ const withCurrency = ref(false)
 const withItems = ref(false)
 const currency = ref(1)
 const amount = ref(100)
-const giftItems = ref<GiftItem[]>([{ item_id: 1001, quantity: 1, expire_sec: 0 }])
+const giftItems = ref<GiftItem[]>([{ item_id: 0, quantity: 1, expire_sec: 0 }])
 const sending = ref(false)
 const items = ref<any[]>([])
 const total = ref(0)
@@ -57,12 +58,12 @@ function formatTarget(row: any): string {
 }
 
 function addGiftRow() {
-  giftItems.value.push({ item_id: 1001, quantity: 1, expire_sec: 0 })
+  giftItems.value.push({ item_id: 0, quantity: 1, expire_sec: 0 })
 }
 
 function removeGiftRow(i: number) {
   giftItems.value.splice(i, 1)
-  if (!giftItems.value.length) giftItems.value.push({ item_id: 1001, quantity: 1, expire_sec: 0 })
+  if (!giftItems.value.length) giftItems.value.push({ item_id: 0, quantity: 1, expire_sec: 0 })
 }
 
 async function load() {
@@ -93,7 +94,7 @@ async function send() {
     ? giftItems.value.filter((x) => x.item_id > 0 && x.quantity > 0)
     : []
   if (withItems.value && itemRows.length === 0) {
-    ElMessage.warning('请填写至少一个有效道具')
+    ElMessage.warning('请选择至少一个有效道具')
     return
   }
 
@@ -172,18 +173,13 @@ onMounted(load)
         <el-switch v-model="withItems" active-text="带道具" inactive-text="无" />
         <div v-if="withItems" class="items-panel">
           <div class="items-head">
-            <span class="col-id">道具 ID</span>
+            <span class="col-id">道具</span>
             <span class="col-qty">数量</span>
             <span class="col-exp">过期秒数</span>
             <span class="col-act">操作</span>
           </div>
           <div v-for="(row, i) in giftItems" :key="i" class="items-row">
-            <el-input-number
-              v-model="row.item_id"
-              :min="1"
-              class="col-id"
-              controls-position="right"
-            />
+            <ItemSelect v-model="row.item_id" class="col-id" placeholder="选择道具" />
             <el-input-number
               v-model="row.quantity"
               :min="1"
@@ -282,7 +278,8 @@ onMounted(load)
   font-size: 13px;
   margin-bottom: 8px;
 }
-.items-row :deep(.el-input-number) {
+.items-row :deep(.el-input-number),
+.items-row :deep(.el-select) {
   width: 100%;
 }
 .items-hint {

@@ -2,13 +2,13 @@
 
 | 项目 | 内容 |
 |------|------|
-| 文档版本 | V1.3 |
+| 文档版本 | V1.4 |
 | 创建日期 | 2026-09-28 |
-| 文档状态 | 修订（基于 SRS V1.16；增补 FR-BAG 背包与道具） |
+| 文档状态 | 修订（基于 SRS V1.17；增补 Admin 道具选择联动） |
 | 依据文档 | [棋牌游戏服务端-需求文档.md](./棋牌游戏服务端-需求文档.md) |
 | 适用范围 | 游戏服（C++/MSVC 单体）、**简单版网页客户端（Vue）**、运营后台（Vue）、协议与数据契约 |
 
-本文档将已闭合需求落实为可开发的技术规格：目录结构、协议帧、消息 ID、表结构、配置默认值、状态机与模块接口、**网页客户端页面与联调要求**。需求冲突时以 **SRS V1.16** 为准，并回写修订本 SPEC。
+本文档将已闭合需求落实为可开发的技术规格：目录结构、协议帧、消息 ID、表结构、配置默认值、状态机与模块接口、**网页客户端页面与联调要求**。需求冲突时以 **SRS V1.17** 为准，并回写修订本 SPEC。
 
 ---
 
@@ -1031,7 +1031,7 @@ Consume / Admin.revoke
 | FR-BAG-06/07/08 | 三类道具各发放一条路径；qty 不过期；ttl/qty_ttl 到期后不可 Consume |
 | FR-BAG-04/05/10 | 重复幂等键不双加；流水可追溯 |
 | FR-BAG-11 | 活动领奖、邮件附件、Admin grant 至少各打通一类道具 |
-| FR-BAG-13 | Admin 可 CRUD 道具定义、上下架、查背包/流水 |
+| FR-BAG-13 | Admin 可 CRUD 道具定义、上下架、查背包/流水；`item_id` 表单/筛选用 ItemSelect（§14.2.1） |
 | FR-WEB-06a | game-web `/bag` 可见持有与过期时间 |
 
 ---
@@ -1125,8 +1125,7 @@ Consume / Admin.revoke
 | /rounds | 对局 | cs+ |
 | /templates | 场次 | ops+ |
 | /activities | 活动（奖励可配道具） | ops+ |
-| /items | 道具定义 CRUD/上下架 | ops+ |
-| /item-ledgers | 道具流水 | cs+ |
+| /items | 道具定义 CRUD/上下架；人工发放/背包/流水 | ops+ |
 | /pay/products | 充值档位（可赠送道具） | ops+ |
 | /pay/orders | 订单 | cs+ |
 | /announce | 公告 | ops+ |
@@ -1134,6 +1133,22 @@ Consume / Admin.revoke
 | /rank | 排行快照查询 | cs+ |
 | /ops | 维护/白名单 | super |
 | /audit | 审计 | super |
+| /reports | 报表 CSV 下载 | ops+ |
+
+### 14.2.1 道具选择联动（FR-ADMIN-25）
+
+后台凡需填写 `item_id` 的交互**不得**使用自由数字输入，统一组件 `admin-web/src/components/ItemSelect.vue`：
+
+| 页面 | 场景 |
+|------|------|
+| `/activities` | 活动奖励 `items[]` |
+| `/mail` | 邮件附件道具行 |
+| `/pay/products` | 档位赠送道具行 |
+| `/items` | 人工发放；道具流水筛选（可清空=不限；可含已下架） |
+
+- 选项来源：`GET /admin/v1/items`；展示 `ID 名称 (kind)`；可过滤搜索。  
+- 默认仅已上架；流水筛选等传 `includeDisabled`。  
+- 保存前过滤 `item_id<=0` 的空行；未选有效道具则提示，不提交自由 ID。  
 
 ---
 
@@ -1221,7 +1236,7 @@ Consume / Admin.revoke
 | 结算/领奖/支付/道具发放幂等 | 重复请求单测 |
 | 斗地主服务端权威 | 篡改出牌包被拒 |
 | 无 Kafka/微服务 | 部署拓扑检查 |
-| Vue 运营后台 | 用例清单走查（含道具定义/补发） |
+| Vue 运营后台 | 用例清单走查（含道具定义/补发；`item_id` 均从定义选择） |
 | 简单网页客户端 | 三开窗口打完一局 + 活动领奖 + 背包页 |
 | FR-SOC-01～04 | 见 §10.6 |
 | FR-BAG | 见 §11.5 |
@@ -1236,7 +1251,8 @@ Consume / Admin.revoke
 | V1.1 | 2026-09-23 | 增加简单版网页游戏客户端（game-web），对齐 SRS V1.14 |
 | V1.2 | 2026-09-28 | 新增 §10 社交与战绩（FR-SOC）：表/Redis/API/msg_id/模块接口；里程碑 M7 |
 | V1.3 | 2026-09-28 | 新增 §11 背包与道具（FR-BAG）：三类道具、表/API/BagService、活动邮件挂钩；里程碑 M8；对齐 SRS V1.16 |
+| V1.4 | 2026-09-29 | §14.2.1 运营后台道具选择联动（`ItemSelect`）；对齐 SRS V1.17 / FR-ADMIN-25 |
 
 ---
 
-**关联文档**：需求以 `docs/棋牌游戏服务端-需求文档.md`（**V1.16**）为准；字段级 `.proto` 与 DDL 脚本在实现阶段落入 `proto/` 与 `server/sql/`，并与本 SPEC 的 msg_id / 表名保持一致。
+**关联文档**：需求以 `docs/棋牌游戏服务端-需求文档.md`（**V1.17**）为准；字段级 `.proto` 与 DDL 脚本在实现阶段落入 `proto/` 与 `server/sql/`，并与本 SPEC 的 msg_id / 表名保持一致。
