@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -54,7 +53,6 @@ class MysqlClient {
   MysqlClient& operator=(const MysqlClient&) = delete;
 
   bool Ping();
-  bool Available() const { return available_.load(std::memory_order_relaxed); }
   int PoolSize() const { return pool_size_; }
 
   // Legacy text SQL (prefer *Bind). Returns affected rows on success, -1 on failure.
@@ -134,7 +132,6 @@ class MysqlClient {
   std::vector<Slot> slots_;
   int borrowed_{0};
   bool stopping_{false};
-  std::atomic<bool> available_{false};
 };
 
 }  // namespace pandora

@@ -1,4 +1,4 @@
-#include "social/social_service.hpp"
+﻿#include "social/social_service.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -103,12 +103,12 @@ std::string SocialService::RankRedisKey(const std::string& period) const {
 std::string SocialService::NicknameOf(int64_t uid) const {
   auto p = wallet_.Profile(uid);
   if (p) return p->nickname.empty() ? ("Player" + std::to_string(uid)) : p->nickname;
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind("SELECT nickname FROM player_profile WHERE uid=? LIMIT 1", {I64(uid)});
-    if (rows && !rows->empty() && !rows->front().cols.empty() && !rows->front().cols[0].empty()) {
-      return rows->front().cols[0];
-    }
+  auto rows = mysql_.QueryBind("SELECT nickname FROM player_profile WHERE uid=? LIMIT 1", {I64(uid)});
+  if (rows && !rows->empty() && !rows->front().cols.empty() && !rows->front().cols[0].empty()) {
+    return rows->front().cols[0];
   }
+  
+
   return "Player" + std::to_string(uid);
 }
 
@@ -131,17 +131,13 @@ void SocialService::ApplyStatsForPlayer(int64_t uid, int64_t delta, bool is_land
 void SocialService::OnRoundSettled(int64_t round_id, int /*template_id*/, const std::string& players_json,
                                    int /*base_score*/, int /*multiplier*/) {
   auto job = [this, round_id, players_json]() {
-    if (!mysql_.Available()) {
-      PLOG_WARN("OnRoundSettled skipped: mysql unavailable round=" << round_id);
+    // Idempotent: one stats update per round_id
+    if (!redis_.SetNx("soc:stats:" + std::to_string(round_id), "1", 86400 * 7)) {
+      PLOG_INFO("OnRoundSettled skip duplicate round=" << round_id);
       return;
     }
-    // Idempotent: one stats update per round_id
-    if (redis_.Available()) {
-      if (!redis_.SetNx("soc:stats:" + std::to_string(round_id), "1", 86400 * 7)) {
-        PLOG_INFO("OnRoundSettled skip duplicate round=" << round_id);
-        return;
-      }
-    }
+    
+
     try {
       const auto arr = json::parse(players_json, nullptr, false);
       if (!arr.is_array()) return;
@@ -167,7 +163,6 @@ std::string SocialService::SummaryJson(int64_t uid) const {
                {"landlord_rounds", 0},
                {"gold_win_sum", 0},
                {"gold_lose_sum", 0}};
-  if (!mysql_.Available()) return data.dump();
   auto rows = mysql_.QueryBind(
       "SELECT total_rounds,win_rounds,lose_rounds,landlord_rounds,gold_win_sum,gold_lose_sum "
       "FROM player_stats WHERE uid=? LIMIT 1",
@@ -193,7 +188,6 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
   if (page_size > 100) page_size = 100;
   json items = json::array();
   int total = 0;
-  if (!mysql_.Available()) return json{{"items", items}, {"total", 0}, {"page", page}, {"page_size", page_size}}.dump();
 
   auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM game_round_player WHERE uid=?", {I64(uid)});
   if (cnt && !cnt->empty() && !cnt->front().cols.empty()) total = ParseInt(cnt->front().cols[0]);
@@ -234,7 +228,6 @@ std::string SocialService::RecentJson(int64_t uid, int page, int page_size) cons
 }
 
 int SocialService::FriendCount(int64_t uid) const {
-  if (!mysql_.Available()) return 0;
   auto rows = mysql_.QueryBind(
       "SELECT COUNT(*) FROM ("
       "  SELECT uid_high AS fuid FROM friendship WHERE uid_low=?"
@@ -247,7 +240,7 @@ int SocialService::FriendCount(int64_t uid) const {
 }
 
 bool SocialService::AreFriends(int64_t a, int64_t b) const {
-  if (!mysql_.Available() || a == b) return false;
+  if (a == b) return false;
   const int64_t lo = (std::min)(a, b);
   const int64_t hi = (std::max)(a, b);
   auto rows = mysql_.QueryBind("SELECT uid_low FROM friendship WHERE uid_low=? AND uid_high=? LIMIT 1",
@@ -256,7 +249,6 @@ bool SocialService::AreFriends(int64_t a, int64_t b) const {
 }
 
 bool SocialService::HasPending(int64_t from, int64_t to) const {
-  if (!mysql_.Available()) return false;
   auto rows = mysql_.QueryBind(
       "SELECT id FROM friend_request WHERE from_uid=? AND to_uid=? AND status=0 LIMIT 1", {I64(from), I64(to)});
   return rows && !rows->empty();
@@ -264,7 +256,6 @@ bool SocialService::HasPending(int64_t from, int64_t to) const {
 
 std::string SocialService::FriendListJson(int64_t uid) const {
   json items = json::array();
-  if (!mysql_.Available()) return json{{"items", items}}.dump();
   auto rows = mysql_.QueryBind(
       "SELECT fuid FROM ("
       "  SELECT uid_high AS fuid FROM friendship WHERE uid_low=?"
@@ -285,7 +276,6 @@ std::string SocialService::FriendListJson(int64_t uid) const {
 std::string SocialService::FriendPendingJson(int64_t uid) const {
   json incoming = json::array();
   json outgoing = json::array();
-  if (!mysql_.Available()) return json{{"incoming", incoming}, {"outgoing", outgoing}}.dump();
   auto in_rows = mysql_.QueryBind(
       "SELECT id,from_uid,created_at FROM friend_request WHERE to_uid=? AND status=0 ORDER BY id DESC LIMIT 100",
       {I64(uid)});
@@ -320,10 +310,6 @@ bool SocialService::FriendRequest(int64_t from_uid, int64_t to_uid, std::string*
     if (err) *err = "invalid uid";
     return false;
   }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   if (AreFriends(from_uid, to_uid) || HasPending(from_uid, to_uid) || HasPending(to_uid, from_uid)) {
     if (err) *err = "already friends or pending";
     return false;
@@ -346,10 +332,6 @@ bool SocialService::FriendRequest(int64_t from_uid, int64_t to_uid, std::string*
 }
 
 bool SocialService::FriendAccept(int64_t uid, int64_t from_uid, std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   if (!HasPending(from_uid, uid)) {
     if (err) *err = "no pending request";
     return false;
@@ -373,10 +355,6 @@ bool SocialService::FriendAccept(int64_t uid, int64_t from_uid, std::string* err
 }
 
 bool SocialService::FriendReject(int64_t uid, int64_t from_uid, std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const int r = mysql_.ExecBind(
       "UPDATE friend_request SET status=2, updated_at=NOW(3) WHERE from_uid=? AND to_uid=? AND status=0",
       {I64(from_uid), I64(uid)});
@@ -388,10 +366,6 @@ bool SocialService::FriendReject(int64_t uid, int64_t from_uid, std::string* err
 }
 
 bool SocialService::FriendRemove(int64_t uid, int64_t friend_uid, std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const int64_t lo = (std::min)(uid, friend_uid);
   const int64_t hi = (std::max)(uid, friend_uid);
   const int r = mysql_.ExecBind("DELETE FROM friendship WHERE uid_low=? AND uid_high=?", {I64(lo), I64(hi)});
@@ -436,7 +410,6 @@ void SocialService::InsertMailForUid(int64_t uid, const std::string& title, cons
 
 std::string SocialService::MailListJson(int64_t uid) const {
   json items = json::array();
-  if (!mysql_.Available()) return json{{"items", items}}.dump();
   auto rows = mysql_.QueryBind(
       "SELECT id,title,body,attach_json,status,expire_at,created_at FROM mail "
       "WHERE to_uid=? AND status IN (0,1,2) AND expire_at>NOW(3) ORDER BY id DESC LIMIT 100",
@@ -463,10 +436,6 @@ std::string SocialService::MailListJson(int64_t uid) const {
 }
 
 bool SocialService::MailRead(int64_t uid, int64_t mail_id, std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const int r = mysql_.ExecBind(
       "UPDATE mail SET status=1 WHERE id=? AND to_uid=? AND status=0 AND expire_at>NOW(3)", {I64(mail_id), I64(uid)});
   if (r < 0) {
@@ -479,10 +448,6 @@ bool SocialService::MailRead(int64_t uid, int64_t mail_id, std::string* err) {
 
 SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
   SocialOpResult r;
-  if (!mysql_.Available()) {
-    r.error = "mysql unavailable";
-    return r;
-  }
   auto rows = mysql_.QueryBind(
       "SELECT attach_json,status,expire_at FROM mail WHERE id=? AND to_uid=? AND status IN (0,1,2) LIMIT 1",
       {I64(mail_id), I64(uid)});
@@ -552,10 +517,6 @@ SocialOpResult SocialService::MailClaim(int64_t uid, int64_t mail_id) {
 }
 
 bool SocialService::MailDelete(int64_t uid, int64_t mail_id, std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const int r = mysql_.ExecBind("UPDATE mail SET status=3 WHERE id=? AND to_uid=? AND status IN (0,1,2)", {I64(mail_id), I64(uid)});
   if (r <= 0) {
     if (err) *err = "mail not found";
@@ -567,10 +528,6 @@ bool SocialService::MailDelete(int64_t uid, int64_t mail_id, std::string* err) {
 bool SocialService::AdminSendMail(int admin_id, const std::string& scope, const std::vector<int64_t>& uids,
                                   const std::string& title, const std::string& body, const std::string& attach_json,
                                   std::string* err) {
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   if (title.empty()) {
     if (err) *err = "title required";
     return false;
@@ -618,7 +575,6 @@ std::string SocialService::AdminMailLogJson(int page, int page_size) const {
   if (page_size < 1) page_size = 20;
   if (page_size > 100) page_size = 100;
   json items = json::array();
-  if (!mysql_.Available()) return json{{"items", items}, {"total", 0}}.dump();
   int total = 0;
   auto cnt = mysql_.QueryBind("SELECT COUNT(*) FROM mail_send_log", {});
   if (cnt && !cnt->empty()) total = ParseInt(cnt->front().cols[0]);
@@ -657,7 +613,6 @@ std::string SocialService::AdminMailLogJson(int page, int page_size) const {
 void SocialService::OnGoldChanged(int64_t uid, int64_t gold) {
   if (uid <= 0) return;
   auto job = [this, uid, gold]() {
-    if (!redis_.Available()) return;
     const std::string member = std::to_string(uid);
     const double score = static_cast<double>(gold);
     const std::string daily = RankRedisKey("daily");
@@ -682,7 +637,7 @@ std::string SocialService::RankJson(int64_t uid, const std::string& period, int 
   json me = {{"rank", 0}, {"score", 0}};
   const std::string period_key = PeriodKeyOf(period);
 
-  if (redis_.Available()) {
+  {
     const std::string key = RankRedisKey(period);
     std::vector<std::pair<std::string, double>> rows;
     if (redis_.ZRevRangeWithScores(key, 0, limit - 1, &rows)) {
@@ -697,7 +652,8 @@ std::string SocialService::RankJson(int64_t uid, const std::string& period, int 
     auto zs = redis_.ZScore(key, std::to_string(uid));
     if (zr) me["rank"] = static_cast<int>(*zr) + 1;
     if (zs) me["score"] = static_cast<int64_t>(*zs);
-  } else if (mysql_.Available()) {
+  }
+  if (list.empty()) {
     // Fallback: order by gold
     auto rows = mysql_.QueryBind(
         "SELECT uid,gold,nickname FROM player_profile ORDER BY gold DESC, uid ASC LIMIT ?", {I64(limit)});
@@ -732,22 +688,18 @@ bool SocialService::SnapshotRank(const std::string& period, std::string* err) {
     if (err) *err = "bad period";
     return false;
   }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const std::string period_key = PeriodKeyOf(period);
   const int top_n = cfg_.rank_top_n > 0 ? cfg_.rank_top_n : 100;
   std::vector<std::pair<int64_t, int64_t>> entries;  // uid, score
 
-  if (redis_.Available()) {
-    std::vector<std::pair<std::string, double>> rows;
-    if (redis_.ZRevRangeWithScores(RankRedisKey(period), 0, top_n - 1, &rows)) {
-      for (const auto& [member, score] : rows) {
-        entries.emplace_back(ParseI64(member), static_cast<int64_t>(score));
-      }
+  std::vector<std::pair<std::string, double>> rows;
+  if (redis_.ZRevRangeWithScores(RankRedisKey(period), 0, top_n - 1, &rows)) {
+    for (const auto& [member, score] : rows) {
+      entries.emplace_back(ParseI64(member), static_cast<int64_t>(score));
     }
   }
+  
+
   if (entries.empty()) {
     auto rows = mysql_.QueryBind("SELECT uid,gold FROM player_profile ORDER BY gold DESC, uid ASC LIMIT ?",
                                  {I64(top_n)});
@@ -776,7 +728,6 @@ std::string SocialService::AdminRankSnapshotJson(const std::string& period, int 
   if (page_size > 100) page_size = 100;
   json items = json::array();
   std::string use_period = period.empty() ? "daily" : period;
-  if (!mysql_.Available()) return json{{"items", items}, {"period", use_period}}.dump();
 
   std::string period_key;
   auto keys = mysql_.QueryBind(

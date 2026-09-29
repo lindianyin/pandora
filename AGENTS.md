@@ -95,9 +95,9 @@ Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）�
 
 - 均使用连接池（`pool_size`，见 `server/conf/server.json`），支持失败自动重连并重试一次。
 - MySQL：自建池 + **`ExecBind`/`QueryBind` 预处理参数绑定**（热路径优先）；遗留 `Exec`/`Query` 仅用于无参 SQL。
-- Redis：`redis-plus-plus` `ConnectionPool`；命令路径线程安全，断线重建整池。
+- Redis：`redis-plus-plus` `ConnectionPool`；命令失败在同池重试一次（库在下次 fetch 时重连坏连接）；仅 `redis_==nullptr` 时单飞建池。
 - `LastError()` 为 thread_local，按调用线程返回。
-- `Available()` 为 atomic 观测值，非强一致。
+- 业务侧勿用可用性门禁跳过读写：直接调用 `Exec`/`Query`/`Set`/`Get` 等，依据返回值与 `LastError()` 处理失败；客户端内部已有重连与单次重试。健康检查与仪表盘状态用 `Ping()`（如 `GET /health`、admin dashboard、`main` 启动日志）。
 - **并发模型**：HTTP 与 WSS 分属独立 `io_context`（`worker.biz_threads` / `net.iocp_workers`）；账变/局记录/活动进度经 `AsyncWorker` 异步落库；`SessionHub`/`MemoryStore`/`RoomManager` 按 uid 或 room_id 分片锁。
 
 ## 编码约定

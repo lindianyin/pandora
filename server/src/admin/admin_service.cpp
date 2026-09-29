@@ -1,4 +1,4 @@
-#include "admin/admin_service.hpp"
+﻿#include "admin/admin_service.hpp"
 
 #include <random>
 #include <sstream>
@@ -59,34 +59,32 @@ std::string AdminService::MakeToken() const {
 
 void AdminService::Bootstrap() {
   const std::string hash = HashPassword("admin123");
-  if (mysql_.Available()) {
-    auto rows = mysql_.Query("SELECT id FROM admin_user WHERE username='admin' LIMIT 1");
-    if (rows && rows->empty()) {
-      mysql_.ExecBind("INSERT INTO admin_user(username,password_hash,role,enabled) VALUES('admin',?,'super',1)",
-                      {Str(hash)});
-      PLOG_INFO("seeded admin_user admin/admin123");
-    }
-    lobby_.ReloadFromDb(mysql_);
-    pay_.ReloadFromDb(mysql_);
-  } else {
-    PLOG_WARN("mysql down: admin bootstrap limited");
+  auto rows = mysql_.Query("SELECT id FROM admin_user WHERE username='admin' LIMIT 1");
+  if (rows && rows->empty()) {
+    mysql_.ExecBind("INSERT INTO admin_user(username,password_hash,role,enabled) VALUES('admin',?,'super',1)",
+                    {Str(hash)});
+    PLOG_INFO("seeded admin_user admin/admin123");
   }
-  if (redis_.Available()) {
-    auto v = redis_.Get("ops:maintain");
-    if (!v) redis_.Set("ops:maintain", "0");
-  }
+  lobby_.ReloadFromDb(mysql_);
+  pay_.ReloadFromDb(mysql_);
+  
+
+  auto v = redis_.Get("ops:maintain");
+  if (!v) redis_.Set("ops:maintain", "0");
+  
+
 }
 
 AdminLoginResult AdminService::Login(const std::string& username, const std::string& password) {
   AdminLoginResult r;
-  if (!mysql_.Available()) {
-    r.error = "mysql unavailable";
-    return r;
-  }
   const std::string hash = HashPassword(password);
   auto rows = mysql_.QueryBind("SELECT id,role,password_hash,enabled FROM admin_user WHERE username=? LIMIT 1",
                                {Str(username)});
-  if (!rows || rows->empty() || rows->front().cols.size() < 4) {
+  if (!rows) {
+    r.error = mysql_.LastError().empty() ? "mysql error" : mysql_.LastError();
+    return r;
+  }
+  if (rows->empty() || rows->front().cols.size() < 4) {
     r.error = "invalid credentials";
     return r;
   }
@@ -104,11 +102,11 @@ AdminLoginResult AdminService::Login(const std::string& username, const std::str
     std::lock_guard<std::mutex> lk(mu_);
     admin_sessions_[sess.token] = sess;
   }
-  if (redis_.Available()) {
-    // admin_id|role|username
-    redis_.Set("admin:session:" + sess.token,
-               std::to_string(sess.admin_id) + "|" + RoleName(sess.role) + "|" + username, 86400);
-  }
+  // admin_id|role|username
+  redis_.Set("admin:session:" + sess.token,
+             std::to_string(sess.admin_id) + "|" + RoleName(sess.role) + "|" + username, 86400);
+  
+
   r.ok = true;
   r.token = sess.token;
   r.username = username;
@@ -117,7 +115,7 @@ AdminLoginResult AdminService::Login(const std::string& username, const std::str
 }
 
 std::optional<AdminSession> AdminService::LoadSessionFromRedis(const std::string& token) const {
-  if (!redis_.Available() || token.empty()) return std::nullopt;
+  if (token.empty()) return std::nullopt;
   auto v = redis_.Get("admin:session:" + token);
   if (!v || v->empty()) return std::nullopt;
   // format: id|role|username
@@ -150,15 +148,15 @@ std::optional<AdminSession> AdminService::Validate(const std::string& token) {
   auto s = LoadSessionFromRedis(token);
   if (!s) return std::nullopt;
   // optional: confirm admin still enabled in MySQL
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind("SELECT enabled,role,username FROM admin_user WHERE id=? LIMIT 1",
-                                 {I64(s->admin_id)});
-    if (!rows || rows->empty() || rows->front().cols[0] != "1") return std::nullopt;
-    if (rows->front().cols.size() >= 3) {
-      s->role = ParseRole(rows->front().cols[1]);
-      s->username = rows->front().cols[2];
-    }
+  auto rows = mysql_.QueryBind("SELECT enabled,role,username FROM admin_user WHERE id=? LIMIT 1",
+                               {I64(s->admin_id)});
+  if (!rows || rows->empty() || rows->front().cols[0] != "1") return std::nullopt;
+  if (rows->front().cols.size() >= 3) {
+    s->role = ParseRole(rows->front().cols[1]);
+    s->username = rows->front().cols[2];
   }
+  
+
   std::lock_guard<std::mutex> lk(mu_);
   admin_sessions_[token] = *s;
   return s;
@@ -169,42 +167,38 @@ bool AdminService::RequireRole(const AdminSession& s, AdminRole min_role) const 
 }
 
 bool AdminService::IsMaintain() const {
-  if (redis_.Available()) {
-    auto v = redis_.Get("ops:maintain");
-    if (v) return *v == "1";
-  }
+  auto v = redis_.Get("ops:maintain");
+  if (v) return *v == "1";
+  
+
   return false;
 }
 
 void AdminService::SetMaintain(bool on) {
-  if (redis_.Available()) redis_.Set("ops:maintain", on ? "1" : "0");
+  redis_.Set("ops:maintain", on ? "1" : "0");
 }
 
 bool AdminService::IsBanned(int64_t uid) const {
-  if (redis_.Available()) {
-    auto v = redis_.Get("user:ban:" + std::to_string(uid));
-    if (v && *v == "1") return true;
-    if (v && *v == "0") return false;
-  }
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind("SELECT status FROM `user` WHERE uid=? LIMIT 1", {I64(uid)});
-    if (rows && !rows->empty() && !rows->front().cols.empty()) return rows->front().cols[0] == "1";
-  }
+  auto v = redis_.Get("user:ban:" + std::to_string(uid));
+  if (v && *v == "1") return true;
+  if (v && *v == "0") return false;
+  
+
+  auto rows = mysql_.QueryBind("SELECT status FROM `user` WHERE uid=? LIMIT 1", {I64(uid)});
+  if (rows && !rows->empty() && !rows->front().cols.empty()) return rows->front().cols[0] == "1";
+  
+
   auto p = store_.GetPlayer(uid);
   return p && p->status == 1;
 }
 
 void AdminService::SetBanned(int64_t uid, bool ban) {
   store_.SetStatus(uid, ban ? 1 : 0);
-  if (redis_.Available()) redis_.Set("user:ban:" + std::to_string(uid), ban ? "1" : "0");
+  redis_.Set("user:ban:" + std::to_string(uid), ban ? "1" : "0");
 }
 
 void AdminService::Audit(int admin_id, const std::string& action, const std::string& target, const std::string& before,
                          const std::string& after) {
-  if (!mysql_.Available()) {
-    PLOG_WARN("audit skipped: mysql unavailable action=" << action);
-    return;
-  }
   auto to_json_col = [](const std::string& s) -> std::string {
     if (s.empty()) return "{}";
     if ((s.front() == '{' && s.back() == '}') || (s.front() == '[' && s.back() == ']')) return s;
@@ -228,36 +222,36 @@ std::string AdminService::DashboardJson() const {
   int64_t players = 0;
   int64_t rounds = 0;
   int64_t orders = 0;
-  if (mysql_.Available()) {
-    if (auto rows = mysql_.Query("SELECT COUNT(*) FROM `user`")) {
-      if (rows && !rows->empty())
-        try {
-          players = std::stoll(rows->front().cols[0]);
-        } catch (...) {
-        }
-    }
-    if (auto rows = mysql_.Query("SELECT COUNT(*) FROM game_round")) {
-      if (rows && !rows->empty())
-        try {
-          rounds = std::stoll(rows->front().cols[0]);
-        } catch (...) {
-        }
-    }
-    if (auto rows = mysql_.Query("SELECT COUNT(*) FROM pay_order")) {
-      if (rows && !rows->empty())
-        try {
-          orders = std::stoll(rows->front().cols[0]);
-        } catch (...) {
-        }
-    }
+  if (auto rows = mysql_.Query("SELECT COUNT(*) FROM `user`")) {
+    if (rows && !rows->empty())
+      try {
+        players = std::stoll(rows->front().cols[0]);
+      } catch (...) {
+      }
   }
+  if (auto rows = mysql_.Query("SELECT COUNT(*) FROM game_round")) {
+    if (rows && !rows->empty())
+      try {
+        rounds = std::stoll(rows->front().cols[0]);
+      } catch (...) {
+      }
+  }
+  if (auto rows = mysql_.Query("SELECT COUNT(*) FROM pay_order")) {
+    if (rows && !rows->empty())
+      try {
+        orders = std::stoll(rows->front().cols[0]);
+      } catch (...) {
+      }
+  }
+  
+
   return json{{"ccu", hub_.OnlineCount()},
               {"players", players},
               {"rounds", rounds},
               {"orders", orders},
               {"maintain", IsMaintain()},
-              {"mysql", mysql_.Available()},
-              {"redis", redis_.Available()}}
+              {"mysql", mysql_.Ping()},
+              {"redis", redis_.Ping()}}
       .dump();
 }
 
@@ -270,38 +264,36 @@ std::string AdminService::ListPlayersJson(const std::string& q, int page, int pa
     std::string created_at;
   };
   std::vector<Row> filtered;
-  if (mysql_.Available()) {
-    std::string sql =
-        "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond,"
-        "DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') "
-        "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid";
-    if (!q.empty()) {
-      sql += " WHERE CAST(u.uid AS CHAR) LIKE '%" + Escape(q) + "%' OR p.nickname LIKE '%" + Escape(q) +
-             "%' OR u.open_id LIKE '%" + Escape(q) + "%'";
-    }
-    sql += " ORDER BY u.uid DESC LIMIT 500";
-    auto rows = mysql_.Query(sql);
-    if (rows) {
-      for (const auto& row : *rows) {
-        if (row.cols.size() < 7) continue;
-        Row r;
-        try {
-          r.p.uid = std::stoll(row.cols[0]);
-          r.p.open_id = row.cols[1];
-          r.p.status = std::stoi(row.cols[2]);
-          r.p.nickname = row.cols[3];
-          r.p.gold = std::stoll(row.cols[4]);
-          r.p.diamond = std::stoll(row.cols[5]);
-          r.created_at = row.cols[6];
-        } catch (...) {
-          continue;
-        }
-        filtered.push_back(std::move(r));
-      }
-    }
-  } else {
-    for (auto& p : store_.ListPlayers(200)) filtered.push_back(Row{std::move(p), {}});
+  std::string sql =
+      "SELECT u.uid,u.open_id,u.status,p.nickname,p.gold,p.diamond,"
+      "DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') "
+      "FROM `user` u INNER JOIN player_profile p ON p.uid=u.uid";
+  if (!q.empty()) {
+    sql += " WHERE CAST(u.uid AS CHAR) LIKE '%" + Escape(q) + "%' OR p.nickname LIKE '%" + Escape(q) +
+           "%' OR u.open_id LIKE '%" + Escape(q) + "%'";
   }
+  sql += " ORDER BY u.uid DESC LIMIT 500";
+  auto rows = mysql_.Query(sql);
+  if (rows) {
+    for (const auto& row : *rows) {
+      if (row.cols.size() < 7) continue;
+      Row r;
+      try {
+        r.p.uid = std::stoll(row.cols[0]);
+        r.p.open_id = row.cols[1];
+        r.p.status = std::stoi(row.cols[2]);
+        r.p.nickname = row.cols[3];
+        r.p.gold = std::stoll(row.cols[4]);
+        r.p.diamond = std::stoll(row.cols[5]);
+        r.created_at = row.cols[6];
+      } catch (...) {
+        continue;
+      }
+      filtered.push_back(std::move(r));
+    }
+  }
+  
+
   const int total = static_cast<int>(filtered.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
@@ -370,36 +362,34 @@ std::string AdminService::ListLedgersJson(int64_t uid, int page, int page_size) 
     std::string created_at;
   };
   std::vector<Row> all;
-  if (mysql_.Available()) {
-    std::string sql =
-        "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id,"
-        "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM ledger";
-    if (uid > 0) sql += " WHERE uid=" + std::to_string(uid);
-    sql += " ORDER BY id DESC LIMIT 500";
-    auto rows = mysql_.Query(sql);
-    if (rows) {
-      for (const auto& row : *rows) {
-        if (row.cols.size() < 9) continue;
-        Row r;
-        try {
-          r.e.id = std::stoll(row.cols[0]);
-          r.e.uid = std::stoll(row.cols[1]);
-          r.e.currency = std::stoi(row.cols[2]);
-          r.e.delta = std::stoll(row.cols[3]);
-          r.e.balance_after = std::stoll(row.cols[4]);
-          r.e.biz_type = row.cols[5];
-          r.e.idempotent_key = row.cols[6];
-          r.e.ref_id = row.cols[7];
-          r.created_at = row.cols[8];
-        } catch (...) {
-          continue;
-        }
-        all.push_back(std::move(r));
+  std::string sql =
+      "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id,"
+      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM ledger";
+  if (uid > 0) sql += " WHERE uid=" + std::to_string(uid);
+  sql += " ORDER BY id DESC LIMIT 500";
+  auto rows = mysql_.Query(sql);
+  if (rows) {
+    for (const auto& row : *rows) {
+      if (row.cols.size() < 9) continue;
+      Row r;
+      try {
+        r.e.id = std::stoll(row.cols[0]);
+        r.e.uid = std::stoll(row.cols[1]);
+        r.e.currency = std::stoi(row.cols[2]);
+        r.e.delta = std::stoll(row.cols[3]);
+        r.e.balance_after = std::stoll(row.cols[4]);
+        r.e.biz_type = row.cols[5];
+        r.e.idempotent_key = row.cols[6];
+        r.e.ref_id = row.cols[7];
+        r.created_at = row.cols[8];
+      } catch (...) {
+        continue;
       }
+      all.push_back(std::move(r));
     }
-  } else {
-    for (auto& e : store_.RecentLedgers(uid, 500)) all.push_back(Row{std::move(e), {}});
   }
+  
+
   const int total = static_cast<int>(all.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
@@ -429,42 +419,42 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
     std::string ended_at;
   };
   std::vector<RoundRow> rounds;
-  if (mysql_.Available()) {
-    std::string sql;
-    if (uid > 0) {
-      sql =
-          "SELECT g.round_id,g.room_id,g.template_id,CAST(g.players_json AS CHAR),g.base_score,g.multiplier,"
-          "DATE_FORMAT(g.started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(g.ended_at,'%Y-%m-%d %H:%i:%s') "
-          "FROM game_round_player p INNER JOIN game_round g ON g.round_id=p.round_id "
-          "WHERE p.uid=" +
-          std::to_string(uid) + " ORDER BY p.ended_at DESC LIMIT 200";
-    } else {
-      sql =
-          "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier,"
-          "DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(ended_at,'%Y-%m-%d %H:%i:%s') FROM game_round "
-          "ORDER BY ended_at DESC LIMIT 200";
-    }
-    auto rows = mysql_.Query(sql);
-    if (rows) {
-      for (const auto& row : *rows) {
-        if (row.cols.size() < 8) continue;
-        RoundRow m;
-        try {
-          m.round_id = std::stoll(row.cols[0]);
-          m.room_id = std::stoll(row.cols[1]);
-          m.template_id = std::stoi(row.cols[2]);
-          m.players_json = row.cols[3];
-          m.base_score = std::stoi(row.cols[4]);
-          m.multiplier = std::stoi(row.cols[5]);
-          m.started_at = row.cols[6];
-          m.ended_at = row.cols[7];
-        } catch (...) {
-          continue;
-        }
-        rounds.push_back(m);
+  std::string sql;
+  if (uid > 0) {
+    sql =
+        "SELECT g.round_id,g.room_id,g.template_id,CAST(g.players_json AS CHAR),g.base_score,g.multiplier,"
+        "DATE_FORMAT(g.started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(g.ended_at,'%Y-%m-%d %H:%i:%s') "
+        "FROM game_round_player p INNER JOIN game_round g ON g.round_id=p.round_id "
+        "WHERE p.uid=" +
+        std::to_string(uid) + " ORDER BY p.ended_at DESC LIMIT 200";
+  } else {
+    sql =
+        "SELECT round_id,room_id,template_id,CAST(players_json AS CHAR),base_score,multiplier,"
+        "DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s'),DATE_FORMAT(ended_at,'%Y-%m-%d %H:%i:%s') FROM game_round "
+        "ORDER BY ended_at DESC LIMIT 200";
+  }
+  auto rows = mysql_.Query(sql);
+  if (rows) {
+    for (const auto& row : *rows) {
+      if (row.cols.size() < 8) continue;
+      RoundRow m;
+      try {
+        m.round_id = std::stoll(row.cols[0]);
+        m.room_id = std::stoll(row.cols[1]);
+        m.template_id = std::stoi(row.cols[2]);
+        m.players_json = row.cols[3];
+        m.base_score = std::stoi(row.cols[4]);
+        m.multiplier = std::stoi(row.cols[5]);
+        m.started_at = row.cols[6];
+        m.ended_at = row.cols[7];
+      } catch (...) {
+        continue;
       }
+      rounds.push_back(m);
     }
   }
+  
+
   if (page < 1) page = 1;
   if (page_size < 1) page_size = 20;
   if (page_size > 100) page_size = 100;
@@ -486,7 +476,7 @@ std::string AdminService::ListRoundsJson(int64_t uid, int page, int page_size) c
 }
 
 std::string AdminService::ListTemplatesJson() const {
-  if (mysql_.Available()) lobby_.ReloadFromDb(mysql_);
+  lobby_.ReloadFromDb(mysql_);
   const auto& ts = lobby_.Templates();
   json items = json::array();
   for (const auto& t : ts) {
@@ -507,10 +497,6 @@ bool AdminService::PutTemplate(int id, const std::string& name, int base_score, 
     if (err) *err = "forbidden";
     return false;
   }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
-    return false;
-  }
   const int r = mysql_.Exec(
       "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) VALUES(" +
       std::to_string(id) + ",1,'" + Escape(name) + "'," + std::to_string(base_score) + "," + std::to_string(rake_bp) +
@@ -527,7 +513,7 @@ bool AdminService::PutTemplate(int id, const std::string& name, int base_score, 
 }
 
 std::string AdminService::ListProductsJson() const {
-  if (mysql_.Available()) pay_.ReloadFromDb(mysql_);
+  pay_.ReloadFromDb(mysql_);
   auto products = pay_.ListProducts(true);
   json items = json::array();
   for (const auto& p : products) {
@@ -552,10 +538,6 @@ bool AdminService::UpsertProduct(int id, int amount_fen, int diamond, int gift, 
                                  bool enabled, const AdminSession& admin, std::string* err) {
   if (!RequireRole(admin, AdminRole::kOps)) {
     if (err) *err = "forbidden";
-    return false;
-  }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
     return false;
   }
   std::string gifts = gift_items_json.empty() ? "[]" : gift_items_json;
@@ -598,10 +580,6 @@ bool AdminService::DeleteProduct(int id, const AdminSession& admin, std::string*
 bool AdminService::SetProductEnabled(int id, bool enabled, const AdminSession& admin, std::string* err) {
   if (!RequireRole(admin, AdminRole::kOps)) {
     if (err) *err = "forbidden";
-    return false;
-  }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
     return false;
   }
   if (id <= 0) {
@@ -653,7 +631,7 @@ bool AdminService::Announce(const std::string& message, const AdminSession& admi
     return false;
   }
   hub_.BroadcastAll(MsgId::kS2C_Error, proto_wire::EncodeS2C_Error(0, message, 0));
-  if (redis_.Available()) redis_.Set("ops:announce:last", message, 86400);
+  redis_.Set("ops:announce:last", message, 86400);
   Audit(admin.admin_id, "announce", "", "", message);
   return true;
 }
@@ -681,34 +659,34 @@ std::string AdminService::ListAuditJson(const std::string& q, int page, int page
     std::string created_at;
   };
   std::vector<AuditRow> audits;
-  if (mysql_.Available()) {
-    std::string sql =
-        "SELECT admin_id,action,target,CAST(before_json AS CHAR),CAST(after_json AS CHAR),"
-        "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
-        "FROM admin_audit";
-    if (!q.empty()) {
-      sql += " WHERE action LIKE '%" + Escape(q) + "%' OR target LIKE '%" + Escape(q) + "%'";
-    }
-    sql += " ORDER BY id DESC LIMIT 200";
-    auto rows = mysql_.Query(sql);
-    if (rows) {
-      for (const auto& row : *rows) {
-        if (row.cols.size() < 6) continue;
-        AuditRow a;
-        try {
-          a.admin_id = std::stoi(row.cols[0]);
-        } catch (...) {
-          continue;
-        }
-        a.action = row.cols[1];
-        a.target = row.cols[2];
-        a.before = row.cols[3];
-        a.after = row.cols[4];
-        a.created_at = row.cols[5];
-        audits.push_back(a);
+  std::string sql =
+      "SELECT admin_id,action,target,CAST(before_json AS CHAR),CAST(after_json AS CHAR),"
+      "DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') "
+      "FROM admin_audit";
+  if (!q.empty()) {
+    sql += " WHERE action LIKE '%" + Escape(q) + "%' OR target LIKE '%" + Escape(q) + "%'";
+  }
+  sql += " ORDER BY id DESC LIMIT 200";
+  auto rows = mysql_.Query(sql);
+  if (rows) {
+    for (const auto& row : *rows) {
+      if (row.cols.size() < 6) continue;
+      AuditRow a;
+      try {
+        a.admin_id = std::stoi(row.cols[0]);
+      } catch (...) {
+        continue;
       }
+      a.action = row.cols[1];
+      a.target = row.cols[2];
+      a.before = row.cols[3];
+      a.after = row.cols[4];
+      a.created_at = row.cols[5];
+      audits.push_back(a);
     }
   }
+  
+
   const int total = static_cast<int>(audits.size());
   const int start = (page - 1) * page_size;
   json items = json::array();
@@ -727,7 +705,6 @@ std::string AdminService::ListAuditJson(const std::string& q, int page, int page
 std::string AdminService::ExportLedgersCsv(int limit) const {
   std::ostringstream oss;
   oss << "id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id\n";
-  if (!mysql_.Available()) return oss.str();
   auto rows = mysql_.Query(
       "SELECT id,uid,currency,delta,balance_after,biz_type,idempotent_key,ref_id FROM ledger ORDER BY id "
       "DESC LIMIT " +
@@ -744,7 +721,6 @@ std::string AdminService::ExportLedgersCsv(int limit) const {
 std::string AdminService::ExportRoundsCsv(int limit) const {
   std::ostringstream oss;
   oss << "round_id,room_id,template_id,base_score,multiplier,players_json\n";
-  if (!mysql_.Available()) return oss.str();
   auto rows = mysql_.Query(
       "SELECT round_id,room_id,template_id,base_score,multiplier,CAST(players_json AS CHAR) FROM game_round ORDER BY "
       "ended_at DESC LIMIT " +
@@ -764,7 +740,6 @@ std::string AdminService::ExportRoundsCsv(int limit) const {
 std::string AdminService::ExportClaimsCsv(int limit) const {
   std::ostringstream oss;
   oss << "id,activity_id,uid,reward_key,created_at\n";
-  if (!mysql_.Available()) return oss.str();
   auto rows = mysql_.Query(
       "SELECT id,activity_id,uid,reward_key,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') FROM activity_claim ORDER BY "
       "id DESC LIMIT " +
@@ -781,10 +756,6 @@ std::string AdminService::ExportClaimsCsv(int limit) const {
 void AdminService::RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json,
                                int base_score, int multiplier) {
   auto job = [this, round_id, room_id, template_id, players_json, base_score, multiplier]() {
-    if (!mysql_.Available()) {
-      PLOG_WARN("RecordRound skipped: mysql unavailable round=" << round_id);
-      return;
-    }
     mysql_.ExecBind(
         "INSERT INTO game_round(round_id,room_id,game_id,template_id,players_json,base_score,multiplier,"
         "started_at,ended_at) VALUES(?,?,1,?,?,?,?,NOW(3),NOW(3)) "

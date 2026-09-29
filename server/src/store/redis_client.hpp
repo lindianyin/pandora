@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -28,7 +27,6 @@ class RedisClient {
   RedisClient& operator=(const RedisClient&) = delete;
 
   bool Ping();
-  bool Available() const { return available_.load(std::memory_order_relaxed); }
   int PoolSize() const { return pool_size_; }
 
   bool Set(const std::string& key, const std::string& value, int ttl_sec = 0);
@@ -61,8 +59,9 @@ class RedisClient {
   int pool_size_{10};
 
   mutable std::mutex mu_;
+  // Serializes pool creation (startup / redis_==nullptr recovery).
+  std::mutex connect_mu_;
   std::shared_ptr<sw::redis::Redis> redis_;
-  std::atomic<bool> available_{false};
 };
 
 }  // namespace pandora

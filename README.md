@@ -38,8 +38,20 @@ docker compose ps
 ## 构建服务端
 
 ```powershell
+# 推荐：一键编译（默认 Release；自动带 vcpkg toolchain；若 pandora-server 正在运行会先结束，避免 LNK1104）
+# 需本机有 vcpkg（环境变量 VCPKG_ROOT，或默认 D:\work\source\vcpkg）
+powershell -ExecutionPolicy Bypass -File server/scripts/build.ps1
+
+# 首次或清理后重新 cmake 配置 / 清 build（-Clean 后会重新 vcpkg install，较慢）
+powershell -ExecutionPolicy Bypass -File server/scripts/build.ps1 -Configure
+powershell -ExecutionPolicy Bypass -File server/scripts/build.ps1 -Clean
+
+# 或手动：
 cd server
-cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake -B build -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" `
+  -DVCPKG_TARGET_TRIPLET=x64-windows `
+  -DVCPKG_MANIFEST_DIR="$PWD/.."
 cmake --build build --config Release
 cd build\Release
 .\pandora-server.exe

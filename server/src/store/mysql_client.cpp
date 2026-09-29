@@ -112,7 +112,6 @@ MysqlClient::MysqlClient(std::string dsn, int pool_size) : dsn_(std::move(dsn)) 
     slot.mysql = ConnectOne();
     if (slot.mysql) ++ok;
   }
-  available_.store(ok > 0, std::memory_order_relaxed);
   if (ok > 0) {
     PLOG_INFO("mysql pool ok " << host_ << ":" << port_ << "/" << database_ << " size=" << pool_size_
                                << " live=" << ok);
@@ -139,7 +138,6 @@ MysqlClient::~MysqlClient() {
     }
     borrowed_ = 0;
   }
-  available_.store(false, std::memory_order_relaxed);
   // Close in parallel — serial mysql_close to Docker/MySQL on Windows is often multi-second.
   std::vector<std::thread> closers;
   closers.reserve(to_close.size());
@@ -207,7 +205,6 @@ bool MysqlClient::ReconnectSlot(std::size_t index) {
     }
     slots_[index].mysql = neu;
   }
-  if (neu) available_.store(true, std::memory_order_relaxed);
   return neu != nullptr;
 }
 
@@ -274,11 +271,9 @@ std::string MysqlClient::LastError() const { return g_mysql_last_error; }
 bool MysqlClient::Ping() {
   auto b = Acquire();
   if (!b) {
-    available_.store(false, std::memory_order_relaxed);
     return false;
   }
   const bool ok = EnsureAlive(*b);
-  available_.store(ok, std::memory_order_relaxed);
   if (ok) g_mysql_last_error.clear();
   return ok;
 }
@@ -298,12 +293,10 @@ int MysqlClient::Exec(const std::string& sql) {
 
   int n = ExecOn(*b, sql);
   if (n >= 0) {
-    available_.store(true, std::memory_order_relaxed);
     return n;
   }
   if (b->mysql && mysql_ping(b->mysql) == 0) return -1;
   if (!ReconnectSlot(b->index)) {
-    available_.store(false, std::memory_order_relaxed);
     return -1;
   }
   {
@@ -311,11 +304,9 @@ int MysqlClient::Exec(const std::string& sql) {
     b->mysql = (b->index < slots_.size()) ? slots_[b->index].mysql : nullptr;
   }
   if (!b->mysql) {
-    available_.store(false, std::memory_order_relaxed);
     return -1;
   }
   n = ExecOn(*b, sql);
-  available_.store(n >= 0, std::memory_order_relaxed);
   return n;
 }
 
@@ -353,12 +344,10 @@ std::optional<std::vector<MysqlRow>> MysqlClient::Query(const std::string& sql) 
 
   auto rows = QueryOn(*b, sql);
   if (rows) {
-    available_.store(true, std::memory_order_relaxed);
     return rows;
   }
   if (b->mysql && mysql_ping(b->mysql) == 0) return std::nullopt;
   if (!ReconnectSlot(b->index)) {
-    available_.store(false, std::memory_order_relaxed);
     return std::nullopt;
   }
   {
@@ -366,11 +355,9 @@ std::optional<std::vector<MysqlRow>> MysqlClient::Query(const std::string& sql) 
     b->mysql = (b->index < slots_.size()) ? slots_[b->index].mysql : nullptr;
   }
   if (!b->mysql) {
-    available_.store(false, std::memory_order_relaxed);
     return std::nullopt;
   }
   rows = QueryOn(*b, sql);
-  available_.store(rows.has_value(), std::memory_order_relaxed);
   return rows;
 }
 
@@ -531,12 +518,10 @@ int MysqlClient::ExecBind(const std::string& sql, const std::vector<SqlArg>& arg
 
   int n = ExecBindOn(*b, sql, args);
   if (n >= 0) {
-    available_.store(true, std::memory_order_relaxed);
     return n;
   }
   if (b->mysql && mysql_ping(b->mysql) == 0) return -1;
   if (!ReconnectSlot(b->index)) {
-    available_.store(false, std::memory_order_relaxed);
     return -1;
   }
   {
@@ -544,11 +529,9 @@ int MysqlClient::ExecBind(const std::string& sql, const std::vector<SqlArg>& arg
     b->mysql = (b->index < slots_.size()) ? slots_[b->index].mysql : nullptr;
   }
   if (!b->mysql) {
-    available_.store(false, std::memory_order_relaxed);
     return -1;
   }
   n = ExecBindOn(*b, sql, args);
-  available_.store(n >= 0, std::memory_order_relaxed);
   return n;
 }
 
@@ -563,12 +546,10 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryBind(const std::string& s
 
   auto rows = QueryBindOn(*b, sql, args);
   if (rows) {
-    available_.store(true, std::memory_order_relaxed);
     return rows;
   }
   if (b->mysql && mysql_ping(b->mysql) == 0) return std::nullopt;
   if (!ReconnectSlot(b->index)) {
-    available_.store(false, std::memory_order_relaxed);
     return std::nullopt;
   }
   {
@@ -576,11 +557,9 @@ std::optional<std::vector<MysqlRow>> MysqlClient::QueryBind(const std::string& s
     b->mysql = (b->index < slots_.size()) ? slots_[b->index].mysql : nullptr;
   }
   if (!b->mysql) {
-    available_.store(false, std::memory_order_relaxed);
     return std::nullopt;
   }
   rows = QueryBindOn(*b, sql, args);
-  available_.store(rows.has_value(), std::memory_order_relaxed);
   return rows;
 }
 

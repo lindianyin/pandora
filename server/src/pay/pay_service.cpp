@@ -1,4 +1,4 @@
-#include "pay/pay_service.hpp"
+﻿#include "pay/pay_service.hpp"
 
 #include <chrono>
 #include <sstream>
@@ -95,7 +95,6 @@ std::string PayService::LoadGiftItemsJson(int product_id) const {
       if (p.id == product_id) return p.gift_items_json.empty() ? "[]" : p.gift_items_json;
     }
   }
-  if (!mysql_.Available()) return "[]";
   auto rows = mysql_.QueryBind("SELECT IFNULL(gift_items_json,'[]') FROM pay_product WHERE id=? LIMIT 1",
                                {I64(product_id)});
   if (!rows || rows->empty()) return "[]";
@@ -103,7 +102,6 @@ std::string PayService::LoadGiftItemsJson(int product_id) const {
 }
 
 std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
-  if (!mysql_.Available()) return std::nullopt;
   auto rows = mysql_.QueryBind(
       "SELECT order_id,uid,product_id,amount_fen,status,alipay_trade_no,"
       "(SELECT diamond+gift_diamond FROM pay_product WHERE id=pay_order.product_id LIMIT 1) "
@@ -143,7 +141,6 @@ std::optional<PayOrder> PayService::LoadOrder(const std::string& order_id) {
 
 std::vector<PayOrder> PayService::ListOrders(size_t limit) const {
   std::vector<PayOrder> out;
-  if (!mysql_.Available()) return out;
   auto rows = mysql_.QueryBind(
       "SELECT o.order_id,o.uid,o.product_id,o.amount_fen,o.status,o.alipay_trade_no,"
       "p.diamond+p.gift_diamond,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') FROM pay_order o "
@@ -194,17 +191,12 @@ std::optional<PayOrder> PayService::CreateOrder(int64_t uid, int product_id) {
   o.amount_fen = prod.amount_fen;
   o.diamond = prod.diamond + prod.gift_diamond;
   o.status = 0;
-  if (mysql_.Available()) {
-    const int r = mysql_.ExecBind(
-        "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid,paid_at) "
-        "VALUES(?,?,?,?,0,'',0,'1970-01-01 00:00:00.000')",
-        {Str(o.order_id), I64(uid), I64(prod.id), I64(prod.amount_fen)});
-    if (r < 0) {
-      PLOG_WARN("CreateOrder mysql fail: " << mysql_.LastError());
-      return std::nullopt;
-    }
-  } else {
-    PLOG_WARN("CreateOrder without mysql");
+  const int r = mysql_.ExecBind(
+      "INSERT INTO pay_order(order_id,uid,product_id,amount_fen,status,alipay_trade_no,idempotent_paid,paid_at) "
+      "VALUES(?,?,?,?,0,'',0,'1970-01-01 00:00:00.000')",
+      {Str(o.order_id), I64(uid), I64(prod.id), I64(prod.amount_fen)});
+  if (r < 0) {
+    PLOG_WARN("CreateOrder mysql fail: " << mysql_.LastError());
     return std::nullopt;
   }
   return o;
@@ -238,7 +230,7 @@ bool PayService::PersistPaid(PayOrder& o, const std::string& trade_no) {
     }
   }
 
-  if (!already_paid && mysql_.Available()) {
+  if (!already_paid) {
     mysql_.ExecBind(
         "UPDATE pay_order SET status=1,alipay_trade_no=?,idempotent_paid=1,paid_at=NOW(3) WHERE order_id=?",
         {Str(o.alipay_trade_no), Str(o.order_id)});

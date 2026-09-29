@@ -1,4 +1,4 @@
-#include "activity/activity_service.hpp"
+﻿#include "activity/activity_service.hpp"
 
 #include <chrono>
 #include <cstdio>
@@ -87,7 +87,6 @@ bool ActivityService::InWindow(const ActivityDef& def) const {
 }
 
 void ActivityService::EnsureStockSchema() {
-  if (!mysql_.Available()) return;
   mysql_.Exec(
       "CREATE TABLE IF NOT EXISTS `activity_stock` ("
       "`activity_id` INT NOT NULL,"
@@ -101,14 +100,14 @@ void ActivityService::InitGiftStock(const ActivityDef& d) {
   if (d.type != "gift") return;
   const int stock = ExtractInt(d.rules_json, "stock", 0);
   const std::string rkey = "act:stock:" + std::to_string(d.id);
-  if (mysql_.Available()) {
-    mysql_.ExecBind("INSERT INTO activity_stock(activity_id,remain) VALUES(?,?) ON DUPLICATE KEY UPDATE activity_id=activity_id",
-                    {I64(d.id), I64(stock)});
-  }
-  if (redis_.Available()) {
-    auto cur = redis_.Get(rkey);
-    if (!cur || cur->empty()) redis_.Set(rkey, std::to_string(stock));
-  }
+  mysql_.ExecBind("INSERT INTO activity_stock(activity_id,remain) VALUES(?,?) ON DUPLICATE KEY UPDATE activity_id=activity_id",
+                  {I64(d.id), I64(stock)});
+  
+
+  auto cur = redis_.Get(rkey);
+  if (!cur || cur->empty()) redis_.Set(rkey, std::to_string(stock));
+  
+
 }
 
 void ActivityService::EnsureSeed() {
@@ -143,10 +142,6 @@ void ActivityService::Bootstrap() {
 
 void ActivityService::Reload() {
   std::vector<ActivityDef> loaded;
-  if (!mysql_.Available()) {
-    PLOG_WARN("activity Reload skipped: mysql unavailable");
-    return;
-  }
   auto rows = mysql_.Query(
       "SELECT id,type,title,CAST(rules_json AS CHAR),DATE_FORMAT(start_at,'%Y-%m-%d %H:%i:%s.%f'),"
       "DATE_FORMAT(end_at,'%Y-%m-%d %H:%i:%s.%f'),enabled FROM activity_define ORDER BY id");
@@ -190,10 +185,6 @@ std::optional<ActivityDef> ActivityService::GetDef(int id) const {
 bool ActivityService::UpsertDef(const ActivityDef& def, std::string* err) {
   if (def.type != "sign" && def.type != "task" && def.type != "gift") {
     if (err) *err = "bad type";
-    return false;
-  }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
     return false;
   }
   if (def.id <= 0) {
@@ -248,7 +239,6 @@ bool ActivityService::SetEnabled(int id, bool enabled, std::string* err) {
 }
 
 int ActivityService::ClaimCount(int activity_id) const {
-  if (!mysql_.Available()) return 0;
   auto rows = mysql_.QueryBind("SELECT COUNT(*) FROM activity_claim WHERE activity_id=?", {I64(activity_id)});
   if (rows && !rows->empty() && !rows->front().cols.empty()) {
     try {
@@ -261,34 +251,30 @@ int ActivityService::ClaimCount(int activity_id) const {
 
 std::string ActivityService::LoadProgress(int64_t uid, int aid) {
   const std::string mk = std::to_string(aid) + ":" + std::to_string(uid);
-  if (redis_.Available()) {
-    auto v = redis_.Get("act:prog:" + mk);
-    if (v && !v->empty()) return *v;
+  auto v = redis_.Get("act:prog:" + mk);
+  if (v && !v->empty()) return *v;
+  
+
+  auto rows = mysql_.QueryBind(
+      "SELECT CAST(progress_json AS CHAR) FROM activity_progress WHERE activity_id=? AND uid=? LIMIT 1",
+      {I64(aid), I64(uid)});
+  if (rows && !rows->empty() && !rows->front().cols.empty()) {
+    const auto& json = rows->front().cols[0];
+    redis_.Set("act:prog:" + mk, json, 86400);
+    return json;
   }
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind(
-        "SELECT CAST(progress_json AS CHAR) FROM activity_progress WHERE activity_id=? AND uid=? LIMIT 1",
-        {I64(aid), I64(uid)});
-    if (rows && !rows->empty() && !rows->front().cols.empty()) {
-      const auto& json = rows->front().cols[0];
-      if (redis_.Available()) redis_.Set("act:prog:" + mk, json, 86400);
-      return json;
-    }
-  }
+  
+
   return "{}";
 }
 
 void ActivityService::SaveProgress(int64_t uid, int aid, const std::string& json) {
   const std::string mk = std::to_string(aid) + ":" + std::to_string(uid);
   // Hot path: refresh Redis immediately; MySQL offloaded.
-  if (redis_.Available()) {
-    if (!redis_.Set("act:prog:" + mk, json, 86400)) PLOG_WARN("SaveProgress redis fail: " << redis_.LastError());
-  }
+  if (!redis_.Set("act:prog:" + mk, json, 86400)) PLOG_WARN("SaveProgress redis fail: " << redis_.LastError());
+  
+
   auto job = [this, uid, aid, json]() {
-    if (!mysql_.Available()) {
-      PLOG_WARN("SaveProgress skipped: mysql unavailable");
-      return;
-    }
     const int r = mysql_.ExecBind(
         "INSERT INTO activity_progress(activity_id,uid,progress_json) VALUES(?,?,?) "
         "ON DUPLICATE KEY UPDATE progress_json=VALUES(progress_json)",
@@ -300,56 +286,53 @@ void ActivityService::SaveProgress(int64_t uid, int aid, const std::string& json
 
 bool ActivityService::HasClaimed(int64_t uid, int aid, const std::string& reward_key) {
   const std::string ck = "act:claim:" + std::to_string(aid) + ":" + std::to_string(uid) + ":" + reward_key;
-  if (redis_.Available()) {
-    auto v = redis_.Get(ck);
-    if (v && !v->empty()) return true;
+  auto v = redis_.Get(ck);
+  if (v && !v->empty()) return true;
+  
+
+  auto rows = mysql_.QueryBind(
+      "SELECT id FROM activity_claim WHERE activity_id=? AND uid=? AND reward_key=? LIMIT 1",
+      {I64(aid), I64(uid), Str(reward_key)});
+  if (rows && !rows->empty()) {
+    redis_.Set(ck, "1");
+    return true;
   }
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind(
-        "SELECT id FROM activity_claim WHERE activity_id=? AND uid=? AND reward_key=? LIMIT 1",
-        {I64(aid), I64(uid), Str(reward_key)});
-    if (rows && !rows->empty()) {
-      if (redis_.Available()) redis_.Set(ck, "1");
-      return true;
-    }
-  }
+  
+
   return false;
 }
 
 void ActivityService::MarkClaimed(int64_t uid, int aid, const std::string& reward_key) {
   const std::string ck = "act:claim:" + std::to_string(aid) + ":" + std::to_string(uid) + ":" + reward_key;
-  if (mysql_.Available()) {
-    const int r = mysql_.ExecBind("INSERT IGNORE INTO activity_claim(activity_id,uid,reward_key) VALUES(?,?,?)",
-                                  {I64(aid), I64(uid), Str(reward_key)});
-    if (r < 0) PLOG_WARN("MarkClaimed mysql fail: " << mysql_.LastError());
-  } else {
-    PLOG_WARN("MarkClaimed skipped: mysql unavailable");
-  }
-  if (redis_.Available()) redis_.Set(ck, "1");
+  // Persist first.
+  const int r = mysql_.ExecBind("INSERT IGNORE INTO activity_claim(activity_id,uid,reward_key) VALUES(?,?,?)",
+                                {I64(aid), I64(uid), Str(reward_key)});
+  if (r < 0) PLOG_WARN("MarkClaimed mysql fail: " << mysql_.LastError());
+  redis_.Set(ck, "1");
 }
 
 int ActivityService::ReadStock(int aid) const {
   const std::string rkey = "act:stock:" + std::to_string(aid);
-  if (redis_.Available()) {
-    auto v = redis_.Get(rkey);
-    if (v && !v->empty()) {
-      try {
-        return std::stoi(*v);
-      } catch (...) {
-      }
+  auto v = redis_.Get(rkey);
+  if (v && !v->empty()) {
+    try {
+      return std::stoi(*v);
+    } catch (...) {
     }
   }
-  if (mysql_.Available()) {
-    auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
-    if (rows && !rows->empty() && !rows->front().cols.empty()) {
-      try {
-        const int n = std::stoi(rows->front().cols[0]);
-        if (redis_.Available()) redis_.Set(rkey, std::to_string(n));
-        return n;
-      } catch (...) {
-      }
+  
+
+  auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
+  if (rows && !rows->empty() && !rows->front().cols.empty()) {
+    try {
+      const int n = std::stoi(rows->front().cols[0]);
+      redis_.Set(rkey, std::to_string(n));
+      return n;
+    } catch (...) {
     }
   }
+  
+
   return 0;
 }
 
@@ -357,13 +340,9 @@ bool ActivityService::DecrStock(int aid, int& remain) {
   const std::string rkey = "act:stock:" + std::to_string(aid);
 
   // MySQL CAS first (source of truth), then sync Redis
-  if (mysql_.Available()) {
-    const int r = mysql_.ExecBind("UPDATE activity_stock SET remain=remain-1 WHERE activity_id=? AND remain>0",
-                                  {I64(aid)});
-    if (r <= 0) {
-      remain = ReadStock(aid);
-      return false;
-    }
+  const int r = mysql_.ExecBind("UPDATE activity_stock SET remain=remain-1 WHERE activity_id=? AND remain>0",
+                                {I64(aid)});
+  if (r > 0) {
     auto rows = mysql_.QueryBind("SELECT remain FROM activity_stock WHERE activity_id=? LIMIT 1", {I64(aid)});
     remain = 0;
     if (rows && !rows->empty() && !rows->front().cols.empty()) {
@@ -373,39 +352,38 @@ bool ActivityService::DecrStock(int aid, int& remain) {
         remain = 0;
       }
     }
-    if (redis_.Available()) redis_.Set(rkey, std::to_string(remain));
+    redis_.Set(rkey, std::to_string(remain));
     return true;
   }
-
-  // Redis-only fallback if MySQL down (still no in-process memory)
-  if (redis_.Available()) {
-    auto cur = redis_.Get(rkey);
-    int n = 0;
-    try {
-      n = cur && !cur->empty() ? std::stoi(*cur) : 0;
-    } catch (...) {
-      n = 0;
-    }
-    if (n <= 0) {
-      remain = 0;
-      return false;
-    }
-    auto after = redis_.Decr(rkey);
-    if (!after) {
-      remain = 0;
-      return false;
-    }
-    if (*after < 0) {
-      redis_.Set(rkey, "0");
-      remain = 0;
-      return false;
-    }
-    remain = static_cast<int>(*after);
-    return true;
+  if (r == 0) {
+    remain = ReadStock(aid);
+    return false;
   }
 
-  remain = 0;
-  return false;
+  // Redis-only fallback if MySQL Exec failed
+  auto cur = redis_.Get(rkey);
+  int n = 0;
+  try {
+    n = cur && !cur->empty() ? std::stoi(*cur) : 0;
+  } catch (...) {
+    n = 0;
+  }
+  if (n <= 0) {
+    remain = 0;
+    return false;
+  }
+  auto after = redis_.Decr(rkey);
+  if (!after) {
+    remain = 0;
+    return false;
+  }
+  if (*after < 0) {
+    redis_.Set(rkey, "0");
+    remain = 0;
+    return false;
+  }
+  remain = static_cast<int>(*after);
+  return true;
 }
 
 void ActivityService::PushUpdate(int64_t uid, const ActivityDef& def, const std::string& progress_json, bool claimable) {

@@ -124,8 +124,8 @@ int main(int argc, char** argv) {
                       << (cfg.net.tls_enabled ? "WSS" : "WS") << " :" << cfg.net.ws_port
                       << " http_workers=" << http_workers << " ws_workers=" << ws_workers
                       << " async_workers=" << cfg.worker.async_threads << " tls=" << cfg.net.tls_enabled
-                      << " force_tls=" << cfg.net.force_tls << " mysql=" << mysql.Available()
-                      << " mysql_pool=" << mysql.PoolSize() << " redis=" << redis.Available()
+                      << " force_tls=" << cfg.net.force_tls << " mysql=" << mysql.Ping()
+                      << " mysql_pool=" << mysql.PoolSize() << " redis=" << redis.Ping()
                       << " redis_pool=" << redis.PoolSize());
 
   for (auto& t : pool) t.join();

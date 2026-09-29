@@ -1,4 +1,4 @@
-#include "bag/bag_service.hpp"
+﻿#include "bag/bag_service.hpp"
 
 #include <chrono>
 #include <ctime>
@@ -59,10 +59,6 @@ BagService::BagService(MysqlClient& mysql, RedisClient& redis, SessionHub& hub, 
     : mysql_(mysql), redis_(redis), hub_(hub), persist_(persist), cfg_(std::move(cfg)) {}
 
 void BagService::Bootstrap() {
-  if (!mysql_.Available()) {
-    PLOG_WARN("bag Bootstrap skipped: mysql unavailable");
-    return;
-  }
   // Ensure seed defs exist (migrate may already have inserted)
   mysql_.Exec(
       "INSERT INTO item_define(id,name,icon,kind,stackable,default_expire_sec,tag,enabled) VALUES"
@@ -75,7 +71,6 @@ void BagService::Bootstrap() {
 
 void BagService::ReloadDefs() {
   std::vector<ItemDef> loaded;
-  if (!mysql_.Available()) return;
   auto rows = mysql_.Query(
       "SELECT id,name,icon,kind,stackable,default_expire_sec,tag,enabled FROM item_define ORDER BY id");
   if (rows) {
@@ -116,10 +111,6 @@ std::optional<ItemDef> BagService::GetDef(int item_id) const {
 bool BagService::UpsertDef(const ItemDef& def, std::string* err) {
   if (def.kind != "qty" && def.kind != "qty_ttl" && def.kind != "ttl") {
     if (err) *err = "bad kind";
-    return false;
-  }
-  if (!mysql_.Available()) {
-    if (err) *err = "mysql unavailable";
     return false;
   }
   ItemDef d = def;
@@ -184,7 +175,7 @@ int BagService::ResolveDurationSec(const ItemDef& def, const ExpirePolicy& polic
 }
 
 bool BagService::LedgerExists(const std::string& idem) const {
-  if (!mysql_.Available() || idem.empty()) return false;
+  if (idem.empty()) return false;
   auto rows = mysql_.QueryBind("SELECT id FROM item_ledger WHERE idempotent_key=? LIMIT 1", {Str(idem)});
   return rows && !rows->empty();
 }
@@ -211,7 +202,6 @@ std::string BagService::ListDefsJson(bool include_disabled) const {
 
 std::string BagService::ListBagJson(int64_t uid, bool include_expired) const {
   json items = json::array();
-  if (!mysql_.Available()) return json{{"items", items}}.dump();
   std::string sql =
       "SELECT b.item_id,b.quantity,DATE_FORMAT(b.expire_at,'%Y-%m-%d %H:%i:%s'),"
       "d.name,d.kind,d.icon,d.tag FROM bag_item b "
@@ -240,7 +230,6 @@ std::string BagService::ListLedgersJson(int64_t uid, int item_id, int page, int 
   if (page_size > 100) page_size = 100;
   json items = json::array();
   int total = 0;
-  if (!mysql_.Available()) return json{{"items", items}, {"total", 0}}.dump();
 
   std::string where = " WHERE 1=1";
   std::vector<SqlArg> binds;
@@ -383,11 +372,6 @@ BagOpResult BagService::Grant(int64_t uid, int item_id, int64_t quantity, const 
     r.err_code = static_cast<int>(Err::kBadParam);
     return r;
   }
-  if (!mysql_.Available()) {
-    r.error = "mysql unavailable";
-    r.err_code = static_cast<int>(Err::kInternal);
-    return r;
-  }
   if (LedgerExists(idempotent_key)) {
     r.ok = true;
     r.quantity_after = GetQuantity(uid, item_id);
@@ -467,11 +451,6 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
   if (uid <= 0 || item_id <= 0 || quantity <= 0 || idempotent_key.empty()) {
     r.error = "bad param";
     r.err_code = static_cast<int>(Err::kBadParam);
-    return r;
-  }
-  if (!mysql_.Available()) {
-    r.error = "mysql unavailable";
-    r.err_code = static_cast<int>(Err::kInternal);
     return r;
   }
   if (LedgerExists(idempotent_key)) {
@@ -572,7 +551,6 @@ BagOpResult BagService::Consume(int64_t uid, int item_id, int64_t quantity, cons
 }
 
 int64_t BagService::GetQuantity(int64_t uid, int item_id) const {
-  if (!mysql_.Available()) return 0;
   auto rows = mysql_.QueryBind(
       "SELECT COALESCE(SUM(quantity),0) FROM bag_item WHERE uid=? AND item_id=? AND quantity>0 AND expire_at>NOW(3)",
       {I64(uid), I64(item_id)});

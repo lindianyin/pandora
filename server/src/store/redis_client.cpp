@@ -18,8 +18,7 @@ thread_local std::string g_redis_last_error;
 RedisClient::RedisClient(std::string uri, int pool_size) : uri_(std::move(uri)) {
   pool_size_ = pool_size < 1 ? 1 : pool_size;
   ParseUri();
-  available_.store(EnsureConnected(), std::memory_order_relaxed);
-  if (available_.load(std::memory_order_relaxed)) {
+  if (EnsureConnected()) {
     PLOG_INFO("redis pool ok " << host_ << ":" << port_ << "/" << db_ << " size=" << pool_size_);
   } else {
     PLOG_WARN("redis pool unavailable: " << g_redis_last_error);
@@ -27,9 +26,9 @@ RedisClient::RedisClient(std::string uri, int pool_size) : uri_(std::move(uri)) 
 }
 
 RedisClient::~RedisClient() {
+  std::lock_guard<std::mutex> connect_lk(connect_mu_);
   std::lock_guard<std::mutex> lk(mu_);
   redis_.reset();
-  available_.store(false, std::memory_order_relaxed);
 }
 
 void RedisClient::ParseUri() {
@@ -66,6 +65,13 @@ std::shared_ptr<sw::redis::Redis> RedisClient::GetRedis() {
 }
 
 bool RedisClient::EnsureConnected() {
+  // Single-flight: avoid concurrent full-pool construction.
+  std::lock_guard<std::mutex> connect_lk(connect_mu_);
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    if (redis_) return true;
+  }
+
   try {
     sw::redis::ConnectionOptions opts;
     opts.host = host_;
@@ -87,19 +93,16 @@ bool RedisClient::EnsureConnected() {
       redis_ = std::move(neu);
     }
     g_redis_last_error.clear();
-    available_.store(true, std::memory_order_relaxed);
     return true;
   } catch (const sw::redis::Error& e) {
     SetError(e.what());
     std::lock_guard<std::mutex> lk(mu_);
     redis_.reset();
-    available_.store(false, std::memory_order_relaxed);
     return false;
   } catch (const std::exception& e) {
     SetError(e.what());
     std::lock_guard<std::mutex> lk(mu_);
     redis_.reset();
-    available_.store(false, std::memory_order_relaxed);
     return false;
   }
 }
@@ -111,28 +114,21 @@ bool RedisClient::RunWithRetry(const std::function<void(sw::redis::Redis&)>& fn)
     r = GetRedis();
     if (!r) return false;
   }
-  try {
-    fn(*r);
-    g_redis_last_error.clear();
-    available_.store(true, std::memory_order_relaxed);
-    return true;
-  } catch (const std::exception& e) {
-    SetError(e.what());
+
+  // redis-plus-plus reconnects broken connections on the next pool fetch;
+  // retry the command once on the same pool (do not rebuild the whole pool).
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    try {
+      fn(*r);
+      g_redis_last_error.clear();
+      return true;
+    } catch (const std::exception& e) {
+      SetError(e.what());
+      if (attempt == 0) continue;
+      return false;
+    }
   }
-  // auto-reconnect pool + one retry
-  if (!EnsureConnected()) return false;
-  r = GetRedis();
-  if (!r) return false;
-  try {
-    fn(*r);
-    g_redis_last_error.clear();
-    available_.store(true, std::memory_order_relaxed);
-    return true;
-  } catch (const std::exception& e) {
-    SetError(e.what());
-    available_.store(false, std::memory_order_relaxed);
-    return false;
-  }
+  return false;
 }
 
 bool RedisClient::Ping() {
