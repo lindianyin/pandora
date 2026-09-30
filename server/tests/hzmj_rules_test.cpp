@@ -159,6 +159,24 @@ void TestHu() {
     Expect(r.ok && r.kind == HuKind::kQiDui && r.baotou, "checkhu qi ke flags");
     Expect(ComputeM(r, 0, 0) == 4, "qi ke M from CheckHu is 4");
   }
+  // exposed meld blocks qi dui even when the concealed tiles are pairs
+  {
+    auto closed = H({0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, 12});
+    Expect(CheckHu(closed, {}, 12, true).kind == HuKind::kQiDui, "closed qi dui");
+    std::vector<Meld> melds = {Meld{MeldType::kPeng, 31, {}, 1}};
+    auto r = CheckHu(closed, melds, 12, true);
+    Expect(!r.ok && r.kind != HuKind::kQiDui, "14 plus peng is not qi dui");
+    auto pairs = H({0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10});
+    r = CheckHu(pairs, melds, 10, true);
+    Expect(!r.ok && r.kind != HuKind::kQiDui, "pairs plus peng is not qi dui");
+  }
+  // three quads + one pair
+  {
+    auto h = H({0, 0, 0, 0, 2, 2, 2, 2, 4, 4, 4, 4, 6, 6});
+    auto r = CheckHu(h, {}, 6, true);
+    Expect(r.ok && r.kind == HuKind::kQiDui && r.haohua == 3 && r.qing_qi_dui, "san haohua qing qi dui");
+    Expect(ComputeM(r, 0, 0) == 32, "san haohua qing M=32");
+  }
 }
 
 void TestScore() {

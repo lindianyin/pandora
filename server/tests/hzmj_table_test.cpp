@@ -1415,6 +1415,101 @@ void TestGangChainClearsOnChi() {
   Expect(t.seat(0).gang_chain == 0, "chi clears gang chain");
 }
 
+void TestQiangGangLouHu() {
+  HzmjConfig cfg;
+  cfg.lou_hu = true;
+  cfg.qiang_gang_hu = true;
+  cfg.start_as_sanlao = true;
+  HzmjTable t(cfg, {1, 2, 3, 4}, /*banker*/ 0, 1);
+  t.SetHandForTest(0, CountTiles({5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}));
+  t.SetHandForTest(1, CountTiles({5, 0, 1, 2, 3, 4, 6, 7, 8, 9, 10}));
+  Meld peng;
+  peng.type = MeldType::kPeng;
+  peng.tile = 5;
+  peng.from_seat = 3;
+  t.SetMeldsForTest(1, {peng});
+  t.SetHandForTest(2, CountTiles({0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 27, 27}));
+  t.SetHandForTest(3, CountTiles({27, 28, 29, 30, 31, 32, 27, 28, 29, 30, 31, 32, 26}));
+  t.SetWallForTest({12, 13});
+  t.Start();
+  Expect(t.OnDiscard(0, 5), "discard waited tile");
+  Expect(t.SeatNeedsClaimInput(2), "seat2 offered hu");
+  Expect(t.OnAction(2, ActionKind::kPass, nullptr), "pass records lou");
+  Expect(!t.seat(2).lou_hu.empty() && t.seat(2).lou_hu[0] == 5, "lou tile 5");
+  PassClaims(t);
+  Expect(t.turn_seat() == 1, "peng seat to act");
+  Expect(t.OnBuGang(1, 5), "bu gang the lou tile");
+  Expect(!t.qiang_pending(), "lou hu skips qiang window");
+  Expect(!t.SeatNeedsClaimInput(2), "seat2 cannot qiang");
+  Expect(t.phase() == Phase::kPlay, "play continues");
+  Expect(t.seat(1).melds[0].type == MeldType::kBuGang, "bu gang stands");
+}
+
+void TestGangOnEmptyWallLiuJu() {
+  HzmjConfig cfg;
+  {
+    HzmjTable t(cfg, {1, 2, 3, 4}, 0, 1);
+    t.SetHandForTest(0, CountTiles({0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}));
+    t.SetHandForTest(1, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}));
+    t.SetHandForTest(2, CountTiles({27, 28, 29, 30, 31, 32, 27, 28, 29, 30, 31, 32, 26}));
+    t.SetHandForTest(3, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27}));
+    t.SetWallForTest({});
+    t.Start();
+    Expect(t.OnAnGang(0, 0), "an gang into empty wall");
+    Expect(t.phase() == Phase::kLiuJu, "an gang liuju");
+    Expect(t.lian_zhuang() == 2, "an gang liuju lian+1");
+    Expect(t.last_settle().stake == 0, "an gang liuju no stake");
+  }
+  {
+    HzmjTable t(cfg, {1, 2, 3, 4}, 0, 1);
+    t.SetHandForTest(0, CountTiles({5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}));
+    t.SetHandForTest(1, CountTiles({5, 5, 5, 22, 23, 24, 25, 26, 27, 27, 28, 28, 29}));
+    t.SetHandForTest(2, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}));
+    t.SetHandForTest(3, CountTiles({27, 28, 29, 30, 31, 32, 27, 28, 29, 30, 31, 32, 26}));
+    t.SetWallForTest({});
+    t.Start();
+    Expect(t.OnDiscard(0, 5), "ming gang discard");
+    Expect(t.OnAction(1, ActionKind::kGang, nullptr), "ming gang");
+    PassClaims(t);
+    Expect(t.phase() == Phase::kLiuJu, "ming gang liuju");
+  }
+  {
+    HzmjTable t(cfg, {1, 2, 3, 4}, /*banker*/ 1, 1);
+    t.SetHandForTest(1, CountTiles({5, 0, 1, 2, 3, 4, 6, 7, 8, 9, 10}));
+    Meld peng;
+    peng.type = MeldType::kPeng;
+    peng.tile = 5;
+    peng.from_seat = 0;
+    t.SetMeldsForTest(1, {peng});
+    t.SetHandForTest(0, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}));
+    t.SetHandForTest(2, CountTiles({27, 28, 29, 30, 31, 32, 27, 28, 29, 30, 31, 32, 26}));
+    t.SetHandForTest(3, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27}));
+    t.SetWallForTest({});
+    t.Start();
+    Expect(t.OnBuGang(1, 5), "bu gang into empty wall");
+    Expect(t.phase() == Phase::kLiuJu, "bu gang liuju");
+    Expect(t.seat(1).melds[0].type == MeldType::kBuGang, "bu gang recorded before liuju");
+  }
+}
+
+void TestGangBaoZimo() {
+  HzmjConfig cfg;
+  cfg.base_score = 100;
+  HzmjTable t(cfg, {1, 2, 3, 4}, 0, 1);
+  // 4x zhong, pair is bai+dong, chows 123 456 78; draw 9wan is gang kai and baotou
+  t.SetHandForTest(0, CountTiles({31, 31, 31, 31, 0, 1, 2, 3, 4, 5, 6, 7, 27, kBai}));
+  t.SetHandForTest(1, CountTiles({14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26}));
+  t.SetHandForTest(2, CountTiles({9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}));
+  t.SetHandForTest(3, CountTiles({27, 28, 29, 30, 32, 32, 18, 19, 20, 21, 22, 23, 24}));
+  t.SetWallForTest({8});
+  t.Start();
+  Expect(t.OnAnGang(0, 31), "an gang");
+  Expect(t.OnZimoHu(0), "gang bao hu");
+  Expect(t.last_hu_zimo(), "gang bao zimo");
+  Expect(t.last_hu_M() == 4, "gang bao M=4");
+  Expect(t.last_settle().stake == 400, "gang bao stake 400");
+}
+
 int main() {
   TestDeal();
   TestDiscardAndDraw();
@@ -1476,6 +1571,9 @@ int main() {
   TestThreeRealChiContract();
   TestGangChainClearsOnPeng();
   TestGangChainClearsOnChi();
+  TestQiangGangLouHu();
+  TestGangOnEmptyWallLiuJu();
+  TestGangBaoZimo();
   TestNoZimoAfterPeng();
   TestCrossRoundLian();
   TestTimeoutClaimPass();
