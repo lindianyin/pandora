@@ -274,7 +274,7 @@ SocialService
 
 | msg_id | 方向 | proto message | 说明 |
 |--------|------|---------------|------|
-| 2001 | S→C | `S2C_DdzGameStart` | 发牌/身份（仅己方手牌） |
+| 2001 | S→C | `S2C_DdzGameStart` | 发牌/身份（仅己方手牌）；字段 `round_id` 供客户端显示局号 |
 | 2002 | S→C | `S2C_DdzTurn` | 轮到谁、阶段 |
 | 2003 | C→S | `C2S_DdzBid` | 叫分 0/1/2/3 |
 | 2004 | S→C | `S2C_DdzBidBroadcast` | 叫分广播 |
@@ -302,7 +302,13 @@ SocialService
 |--------|------|---------------|------|
 | 5001 | S→C | `S2C_BagUpdate` | 背包变更（发放/消耗/过期摘要） |
 
-> `.proto` 字段定义落库到 `proto/`（`social.proto` / `bag.proto`）；本 SPEC 锁定 msg_id 与消息名。变更字段遵守 proto3 兼容规则。
+#### 4.3.7 对局轨迹（调试）
+
+| msg_id | 方向 | proto message | 说明 |
+|--------|------|---------------|------|
+| 9001 | C→S | `C2S_ClientTrace` | 客户端对局轨迹。字段：`round_id`、`seat_id`、`event`、`detail`、`game`（`hzmj` 或 `ddz`）。不带房间号，服务端用 `RoomOf(uid)` 填入日志 |
+
+> `.proto` 字段定义落在 `proto/`；本 SPEC 锁定 msg_id 与消息名。变更字段遵守 proto3 兼容规则。日志行格式见 §15.1。
 
 ### 4.4 防重放（长连接）
 
@@ -745,9 +751,10 @@ stake = base * mult
 
 ### 7.5 断线与托管
 
-- 断线：进入托管，按「最小合法出牌 / 过」策略（可配）  
-- 重连：下发 `S2C_DdzReconnect`（己方手牌+公共信息，不发他人手牌）  
-- 主动取消托管：客户端发 Ready/专用消息（可并入 Play 前清托管标记）  
+- 断线：标记托管。斗地主在 Tick 上可立即代打（叫分代 0、行牌代最小牌或过），到点同样代打  
+- 重连：下发 `S2C_DdzReconnect`（己方手牌 + 公共信息，不发他人手牌）。`timeout_s` 为距原截止点的剩余秒（毫秒向上取整），**不**重新广播完整倒计时、不拨满截止点  
+- 主动取消托管：重连即清除该座位托管标记  
+- 杭州麻将的断线、鸣牌窗代过与剩余倒计时见 `docs/杭州麻将-SPEC.md` §7.2  
 
 ---
 
@@ -1171,7 +1178,9 @@ Consume / Admin.revoke
 |------|------|
 | `/login` | 游客登录 |
 | `/lobby` | 场次列表、金币/钻石、快速匹配 |
-| `/table` | 斗地主桌面：手牌、叫分/出牌/过、倒计时、结算弹层 |
+| `/table` | 斗地主桌面：手牌、叫分/出牌/过、倒计时、局号、结算弹层 |
+| `/hzmj-table` | 杭州麻将桌面：手牌、鸣牌、倒计时、局号、结算 |
+| `/hzmj-lab` | 杭州麻将四联调试 |
 | `/activity` | 活动列表与领奖（至少签到或任务一类） |
 | `/bag` | 背包列表：数量、过期时间可读（FR-BAG / FR-WEB-06a） |
 | `/wallet` | 余额、兑换、充值档位（支付 P1） |
@@ -1186,7 +1195,8 @@ Consume / Admin.revoke
 2. 叫分：按钮 0/1/2/3  
 3. 出牌：点选手牌 +「出牌」「过」；非法出牌提示服务端错误  
 4. 收到 `S2C_DdzSettle` 展示输赢并回大厅/续局  
-5. 断线自动重连并处理 `S2C_DdzReconnect`  
+5. 断线自动重连并处理 `S2C_DdzReconnect`；倒计时显示快照里的剩余秒，不从满值重计  
+6. 对局中把关键步骤以 `C2S_ClientTrace`（9001）上报，桌面显示局号，与服务端日志的 `round=` 对齐  
 
 ### 验收
 
@@ -1200,7 +1210,17 @@ Consume / Admin.revoke
 
 ### 15.1 日志字段
 
-`ts, level, trace_id, uid, room_id, round_id, msg_id, code, err`
+常规行：`ts, level, trace_id, uid, room_id, round_id, msg_id, code, err`。
+
+对局轨迹另写一行，便于按局过滤。文件为进程工作目录下 `logs/pandora_YYYY-MM-DD.log`（从 `server/` 启动时即 `server/logs/`），按日切分，保留 7 天。
+
+```text
+round=<局号> src=server|client game=hzmj|ddz room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
+```
+
+- `src=server` 由服务端直接写。座位类事件的 `uid` 取该座位玩家，流局等无主事件为 `0`。  
+- `src=client` 来自 `C2S_ClientTrace`（9001）。`event` 截断 40、`detail` 截断 500，换行改为空格。`room` 由服务端按连接 uid 查房间填入，与 `src=server` 使用同一房间号。  
+- 过滤示例：`round=1790750821245`。
 
 ### 15.2 指标（最低）
 

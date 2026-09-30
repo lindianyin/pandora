@@ -337,7 +337,7 @@ CanDianpao(shooter, winner):
 | msg_id | 方向 | message | 说明 |
 |--------|------|---------|------|
 | 6001 | S→C | `S2C_HzmjGameStart` | 开局：座位、庄、连庄、财神、己方手牌、配置快照 |
-| 6002 | S→C | `S2C_HzmjTurn` | 阶段、当前座位、倒计时、牌墙余量、飘状态；出牌座位附带权威 `self_hand` |
+| 6002 | S→C | `S2C_HzmjTurn` | 阶段、当前座位、倒计时、牌墙余量、飘状态、`can_zimo`；出牌座位附带权威 `self_hand` |
 | 6003 | S→C | `S2C_HzmjDraw` | 仅摸牌座位收到摸到的牌；他人只收「某座摸牌」 |
 | 6004 | C→S | `C2S_HzmjDiscard` | 出牌；可附带声明暗杠/补杠意图用独立消息 |
 | 6005 | S→C | `S2C_HzmjDiscardBroadcast` | 出牌广播 |
@@ -346,7 +346,7 @@ CanDianpao(shooter, winner):
 | 6008 | S→C | `S2C_HzmjGangScore` | 即时杠分（可选） |
 | 6009 | S→C | `S2C_HzmjSettle` | 终局结算 |
 | 6010 | S→C | `S2C_HzmjLiuJu` | 流局 |
-| 6011 | S→C | `S2C_HzmjReconnect` | 重连快照 |
+| 6011 | S→C | （未单独实现） | 重连复用 6001 / 6007 / 6005 / 6002，见 §7.2 |
 | 6012 | C→S | `C2S_HzmjGang` | 暗杠/补杠（轮到己方 Discard 阶段） |
 | 6013 | S→C | `S2C_HzmjHint` | 可选：可胡/可碰等提示掩码 |
 
@@ -369,7 +369,12 @@ wall_remain
 ```text
 seat_id, sub, timeout_s, wall_remain, piao_seat
 self_hand[]                 // 仅发给当前出牌座位，权威纠偏
+can_zimo                    // 本回合可自摸：摸牌后或庄家起手为 true；吃/碰后的出牌回合为 false
 ```
+
+`timeout_s` 在新回合是配置的完整秒数。重连下发的是距原截止点的剩余秒数（毫秒向上取整），不把截止点重新拨满。
+
+客户端只在 `sub` 为 `discard` 或 `piao`、轮到自己、`can_zimo` 为真且牌型可胡时显示「自摸」。吃碰后若仍发送胡，服务端回 `S2C_Error` `1003`，文案「吃碰之后须出牌，不能自摸」。牌型确实未成胡时文案为「不能自摸胡：牌型未成胡」。
 
 **`C2S_HzmjAction`**
 
@@ -389,13 +394,20 @@ rake[]
 hand_reveal[]               // 各手牌+副露（可配置仅胜方）
 ```
 
-**`S2C_HzmjReconnect`**
+### 7.2 断线、托管与重连
 
-```text
-完整公开桌面 + 己方手牌 + claim 窗剩余 ms + 是否轮到自己
-```
+出牌 / 飘阶段断线只标记托管，**不跳过剩余倒计时**；到点才代打（自摸优先，否则打出刚摸的牌，再否则打最小牌号）。鸣牌窗内断线立刻代打过，避免整桌停在窗口上。重连清除该座位的托管标记。
 
-> 字段级 `.proto` 实现时落入 `proto/game_hzmj.proto`，变更遵守 proto3 兼容；本 SPEC 锁定 **msg_id 与消息名**。
+重连不新开截止点，按顺序只发给该连接：
+
+1. `S2C_HzmjGameStart`（同一 `round_id`、己方手牌、当前牌墙）
+2. 各家已有副露的 `S2C_HzmjActionBroadcast`
+3. 若仍有未吃走的最新弃牌，`S2C_HzmjDiscardBroadcast`
+4. `S2C_HzmjTurn`，`timeout_s` 为剩余秒，`can_zimo` 对应当前回合
+
+同一页面重连（内存里局号未丢）保留河牌与余牌张数，弃牌回放若河牌已以该张结尾则不再追加。桌面显示局号，便于在日志里按 `round=` 过滤。
+
+> 字段级定义以 `proto/game_hzmj.proto` 为准；本 SPEC 锁定 **msg_id 与消息名**。对局轨迹见主 SPEC §15.1。
 
 ---
 
@@ -433,9 +445,10 @@ GameRegistry.Register(game_id=2, factory → HzmjTable)
 
 | 场景 | 行为 |
 |------|------|
-| 出牌超时 | 打出摸进张；若无可出则随机非财神优先 |
-| Claim 超时 | `PASS` |
-| 可胡且托管 | **自动胡**（可配关闭） |
+| 出牌阶段断线 | 标记托管，等到原倒计时结束再代打 |
+| 出牌超时 | 能自摸则自摸；否则打出刚摸进的牌；再否则打最小牌号 |
+| 鸣牌窗断线或超时 | `PASS` |
+| 吃 / 碰之后 | `can_zimo` 为假，不自动自摸，须出牌 |
 
 ---
 
@@ -467,7 +480,7 @@ Redis：无新增必选键；对局状态仅内存 + 落库。
 | 6206 | 财神不可被鸣牌 |
 | 6207 | 动作超时已托管 |
 
-走统一 `S2C_Error` 或动作拒绝回包（实现二选一，推荐动作回包带 code，避免误踢）。
+当前实现走统一 `S2C_Error`。自摸被拒为 `1003`（见 §7.1），不是上表的 620x。
 
 ---
 
@@ -476,9 +489,11 @@ Redis：无新增必选键；对局状态仅内存 + 落库。
 | 页/组件 | 要求 |
 |---------|------|
 | 麻将桌 | 4 人布局、手牌、副露、牌墙余量、财神角标、飘状态横幅 |
-| 操作条 | 出牌、吃/碰/杠/胡/过；倒计时 |
+| 操作条 | 出牌、吃/碰/杠/胡/过；倒计时沿用服务端下发的 `timeout_s`（重连为剩余秒） |
+| 自摸按钮 | 仅 `can_zimo` 且牌型可胡时显示 |
+| 局号 | 牌桌与四联调试显示 `round_id` |
 | 结算层 | 展示 M/N、爆头/飘/杠串、承包箭头、金币变化 |
-| 重连 | 处理 `6011` 恢复 |
+| 重连 | 按 §7.2 重放 6001 / 6007 / 6005 / 6002，不依赖 6011 |
 
 联调：四开窗口同一场次，打完含自摸与一流局。
 
@@ -488,7 +503,7 @@ Redis：无新增必选键；对局状态仅内存 + 落库。
 
 | 范围 | 路径 | 说明 |
 |------|------|------|
-| 帧 / 编解码 / `tileLabel` | `game-web/src/net/frame.test.ts` | 粘包、proto3 seat0、`Turn.self_hand`、signed tile |
+| 帧 / 编解码 / `tileLabel` | `game-web/src/net/frame.test.ts` | 粘包、proto3 seat0、`Turn.self_hand`、`can_zimo`、signed tile、`C2S_ClientTrace` |
 | 吃碰杠预判 | `game-web/src/net/hzmjMeld.test.ts` | 对齐服务端 T10 / chi 边界 |
 | 手牌同步 / 点炮胡按钮 | `game-web/src/net/hzmjHand.test.ts` | 重连幂等扣牌、N≥8 才显示胡 |
 
@@ -516,7 +531,8 @@ npm test
 | T09 | 吃同一家 3 次后该家胡 | 承包者付三家份 |
 | T10 | 打出白板（财神） | 不可被碰 |
 | T11 | 流局 | 无账变；连庄+1 |
-| T12 | 断线重连 | 手牌一致、可续打 |
+| T12 | 断线重连 | 手牌一致、可续打；倒计时为剩余秒，不重新扣满 |
+| T13 | 吃碰后手牌已是和牌形 | 不可自摸；`can_zimo=false`，须先出牌 |
 
 完整用例表实现阶段放入 `server/tests/hzmj/`。
 

@@ -1,8 +1,8 @@
 # Pandora — Agent 指南
 
-棋牌游戏单体服务端（C++）+ Vue 网页客户端 + 运营后台。当前里程碑：**M6**。
+棋牌游戏单体服务端（C++）+ Vue 网页客户端 + 运营后台。平台里程碑：**M6**（IOCP、报表、压测）。玩法：斗地主经典简单规则，以及杭州麻将（白板固定财神）。
 
-需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。
+需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。杭州麻将以 `docs/杭州麻将-SPEC.md` 为准，规则说明见 `docs/杭州麻将规则.md`。
 
 ## 硬约束（不可偏离）
 
@@ -10,28 +10,36 @@
 - **单机房单实例**：目标 CCU ≥ 20000；HTTP/WSS 走 IOCP，禁止按连接 detach 线程。
 - **协议**：长连接帧 `uint32 LE len | uint32 LE msg_id | protobuf`；Admin / 部分短连接用 HTTPS+JSON。
 - **货币**：金币 + 钻石；支付为支付宝 APP（当前沙箱）；无房卡、无冲榜。
-- **首发玩法**：斗地主经典简单规则；匹配/对局自研。
+- **匹配/对局自研**。斗地主 msg_id 2000–2999；杭州麻将 6000–6999。
 - **存储**：MySQL 单主库（权威数据）；Redis 仅缓存/会话/开关，**可重建**。
 
 ## 仓库地图
 
 ```text
-docs/           # SRS / SPEC / M1–M6 计划
-proto/          # 唯一协议契约（.proto）
-server/         # C++ pandora-server（MSVC / CMake）
-  src/net/      # HTTP、WSS、帧、SessionHub、IOCP
+docs/                 # SRS / SPEC / 杭州麻将 / M1–M6 计划
+proto/                # 唯一协议契约（.proto）
+server/               # C++ pandora-server（MSVC / CMake）
+  src/net/            # HTTP、WSS、帧、SessionHub、IOCP
   src/auth/ lobby/ match/ room/ game/
-  src/wallet/ pay/ activity/ admin/ social/
-  src/store/    # MysqlClient、RedisClient、MemoryStore
-  conf/         # server.json / server.tls.json
-  sql/          # schema.sql
-  scripts/      # *_smoke.mjs、ccu_load.mjs
-game-web/       # Vue3 游戏客户端（联调/演示）
-admin-web/      # Vue3 + Element Plus 运营后台
-docker-compose.yml  # MySQL 5.7 + Redis 6.2
+  src/game/hzmj/      # 杭州麻将牌桌、胡牌、计分
+  src/wallet/ pay/ activity/ admin/ social/ bag/
+  src/store/          # MysqlClient、RedisClient、MemoryStore
+  conf/               # server.json / server.tls.json
+  sql/                # schema.sql
+  scripts/            # build.ps1、*_smoke.mjs、ccu_load.mjs
+  tests/              # hzmj_table_test、hzmj_rules_test、ddz_cards_test
+game-web/             # Vue3 游戏客户端（联调/演示，端口 5173）
+admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
+docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```
 
-命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`（见 `server/src/common/log.hpp`）。
+命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`。对局轨迹用 `LogRound`（`server/src/common/log.hpp`），行格式：
+
+```text
+round=<局号> src=server|client game=hzmj|ddz room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
+```
+
+文件在进程工作目录 `logs/pandora_YYYY-MM-DD.log`（从 `server/` 启动即为 `server/logs/`）。客户端经 `C2S_ClientTrace`（9001）上报，服务端用 `RoomOf(uid)` 填房间号。座位类事件的 `uid` 取该座位玩家。
 
 ## 依赖与本地环境
 
@@ -41,16 +49,16 @@ docker-compose.yml  # MySQL 5.7 + Redis 6.2
 | 包管理 | vcpkg：boost-asio/beast、nlohmann-json、protobuf、libmysql、redis-plus-plus、spdlog、openssl |
 | MySQL | `127.0.0.1:3306`，用户/库 `pandora` / `pandora` |
 | Redis | `redis://127.0.0.1:6379/0`，无密码 |
-| 默认端口 | HTTP `8080`，WS `8081` |
+| 默认端口 | HTTP `8080`，WS `8081`；game-web `5173`；admin-web `5174` |
 
 ```powershell
 docker compose up -d
-cd server
-cmake -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release
-cd build\Release
+powershell -ExecutionPolicy Bypass -File server/scripts/build.ps1
+cd server\build\Release
 .\pandora-server.exe
 ```
+
+`pandora-server.exe` 正在运行时链接会 LNK1104。`build.ps1` 会先结束该进程；手动 `cmake --build` 时需先停掉进程。PowerShell 不用 `&&`，用 `;`。
 
 冒烟（需服务已启动）：
 
@@ -59,12 +67,23 @@ node server\scripts\m2_smoke.mjs
 node server\scripts\m3_smoke.mjs
 node server\scripts\admin_smoke.mjs
 node server\scripts\activity_smoke.mjs
+node server\scripts\hzmj_smoke.mjs
 node server\scripts\ccu_load.mjs --target 200
+```
+
+规则测试（不必启动服务）：
+
+```powershell
+cmake --build server\build --config Release --target hzmj_table_test
+cmake --build server\build --config Release --target hzmj_rules_test
+server\build\Release\hzmj_table_test.exe
+cd game-web
+npm test
 ```
 
 `GET /health` 应返回 `mysql:true, redis:true`。
 
-Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）。
+Admin 默认超管：`admin` / `admin123`。
 
 ## 数据落点（改存储前必读）
 
@@ -89,7 +108,7 @@ Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）�
 
 客户端 API 仅有 `Set/Get/Del/Decr/Ping`。文档中规划的 `online:`、`match:q:`、`room:`、限流等**尚未实现**，新增时需同步 SPEC。
 
-钱包/支付幂等键（如 `pay:`、`act:`、`admin:`）写入 **MySQL `ledger`**，不是 Redis。
+钱包/支付幂等键（如 `pay:`、`act:`、`admin:`、`hzmj:`）写入 **MySQL `ledger`**，不是 Redis。
 
 ### MySQL / Redis 客户端
 
@@ -107,15 +126,27 @@ Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）�
 - **金钱与幂等**：余额变更必须走 `WalletService` + `ledger.idempotent_key`；禁止绕过账变直接改余额。
 - **Redis**：当缓存用；断连或不可用时业务应可降级到 MySQL/内存（现有路径已按此设计）。
 - **网络**：新连接逻辑挂在现有 IOCP/Beast 路径上；不要引入「一连接一线程」。
-- **前端**：`game-web` / `admin-web` 为 Vue 3 + Vite；Admin UI 沿用 Element Plus，勿另起一套组件体系。
-- **配置**：默认看 `server/conf/server.json`；TLS 见 `server.tls.json` 与 `force_tls`。
-- **日志**：用现有 `PLOG_*`，不要引入新日志框架。
+- **前端**：`game-web` / `admin-web` 为 Vue 3 + Vite；Admin UI 沿用 Element Plus，勿另起一套组件体系。含中文的 `.vue` 用脚本按 UTF-8 写入；直接替换容易把中文写成 `?`。
+- **C++ 注释**：新增注释用 ASCII。源文件在代码页 936 下，中文 `//` 会触发 C4819 并吃掉下一行。
+- **配置**：默认看 `server/conf/server.json`；TLS 见 `server.tls.json` 与 `force_tls`。实验室行牌超时见 `server.tls.json` 的 `play_timeout_s`。
+- **日志**：用现有 `PLOG_*` / `LogRound`，不要引入新日志框架。
+- **不要提交**：`game-web/tsconfig.tsbuildinfo`、`server/build/`、`logs/`。
+
+## 杭州麻将（改牌桌前）
+
+细节见 `docs/杭州麻将-SPEC.md` §7。实现时保持：
+
+- 自摸只在摸牌之后（庄家起手 14 张、杠后补牌算摸牌）。`S2C_HzmjTurn.can_zimo` 为假时客户端不显示自摸；吃、碰后即使牌型已成型也须先出牌。
+- 出牌阶段断线只标记托管，等到原倒计时结束再代打。鸣牌窗内断线立刻代过。
+- 重连下发剩余秒，不重新 `ArmHzmjDeadline`，斗地主重连不调用 `BroadcastTurn`。
+- 非目标：花牌、定缺、买码、一炮多响、翻财神、抽水以外的旁路结算。
 
 ## 未交付 / 勿假装已完成
 
 - 完整 Schannel TLS（当前有配置与部分 TLS 路径，非完整生产方案）
 - 真实支付宝验签（沙箱占位）
 - 冲榜活动
+- 杭州麻将独立重连消息 `6011`（当前复用 6001 / 6007 / 6005 / 6002）
 - 文档中未落地的 Redis 键（在线、匹配队列、房间元数据、限流等）
 
 ## 文档索引
@@ -123,8 +154,10 @@ Admin 默认超管：`admin` / `admin123`（`admin-web` 开发端口 `5174`）�
 | 文档 | 用途 |
 |------|------|
 | `docs/棋牌游戏服务端-需求文档.md` | 需求（SRS） |
-| `docs/棋牌游戏服务端-SPEC.md` | 技术规格、表结构、协议、模块接口 |
+| `docs/棋牌游戏服务端-SPEC.md` | 技术规格、表结构、协议、模块接口、对局日志 |
+| `docs/杭州麻将-SPEC.md` | 杭州麻将协议、托管、重连、计分 |
+| `docs/杭州麻将规则.md` | 玩法说明（白板财神、爆头、三牢点炮） |
 | `docs/棋牌游戏服务端-M1计划.md` … `M6计划.md` | 里程碑范围与验收 |
 | `README.md` | 本地启动与冒烟入口 |
 
-改行为或契约时：优先对照当前里程碑计划与 SPEC 对应章节，再改代码与冒烟脚本。
+改行为或契约时：先改对应 SPEC（玩法规则同时改 `docs/杭州麻将规则.md`），再改 `proto/`、服务端、`game-web` 与冒烟脚本。
