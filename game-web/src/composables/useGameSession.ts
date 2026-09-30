@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { loginGuest, health } from '../api'
 import { GameSocket } from '../net/GameSocket'
-import { cardLabel, tileLabel, type LobbyTemplate, type RoomSeat, type HzmjSettle } from '../net/frame'
+import { cardLabel, sortDdzHand, tileLabel, type LobbyTemplate, type RoomSeat, type HzmjSettle } from '../net/frame'
 import { canChiClaim, canMingGangClaim, canPengClaim, listChiOptions } from '../net/hzmjMeld'
 import {
   applySelfDiscard,
@@ -260,7 +260,7 @@ function createSocket(): GameSocket {
       currentGameId.value = 1
       if (g.round_id) ddzRoundId.value = g.round_id
       mySeat.value = g.seat_id
-      hand.value = [...g.hand_cards]
+      hand.value = sortDdzHand(g.hand_cards)
       landlordSeat.value = g.landlord_seat
       bottom.value = [...g.bottom_cards]
       selected.value = []
@@ -299,7 +299,7 @@ function createSocket(): GameSocket {
         [p.seat_id]: p.pass ? '过' : p.cards.map(cardLabel).join(' '),
       }
       if (p.seat_id === mySeat.value && !p.pass) {
-        hand.value = hand.value.filter((c) => !p.cards.includes(c))
+        hand.value = sortDdzHand(hand.value.filter((c) => !p.cards.includes(c)))
         selected.value = []
       }
       pushLog(
@@ -318,7 +318,7 @@ function createSocket(): GameSocket {
     },
     onReconnect: (r) => {
       mySeat.value = r.seat_id
-      hand.value = [...r.hand]
+      hand.value = sortDdzHand(r.hand)
       selected.value = []
       landlordSeat.value = r.landlord_seat
       turnSeat.value = r.current_seat

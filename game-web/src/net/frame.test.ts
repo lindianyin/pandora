@@ -16,6 +16,7 @@ import {
   decodeS2C_HzmjActionBroadcast,
   decodeS2C_HzmjSettle,
   decodeS2C_HzmjLiuJu,
+  sortDdzHand,
 } from './frame'
 import { concat, encBytes, encPackedInt32, encString, encVarint } from './pbTestUtil'
 
@@ -44,6 +45,13 @@ describe('frame wire', () => {
     const { frames, rest } = tryDecodeFrames(bad)
     expect(frames).toHaveLength(0)
     expect(rest.length).toBe(0)
+  })
+})
+
+describe('sortDdzHand', () => {
+  it('orders by rank 3..A,2 then jokers', () => {
+    // 2♠=12, 3♥=13, A♣=37, 小王=52, 大王=53, 5♦=43
+    expect(sortDdzHand([53, 12, 43, 13, 52, 37])).toEqual([13, 43, 37, 12, 52, 53])
   })
 })
 

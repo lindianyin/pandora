@@ -43,6 +43,7 @@ onMounted(() => {
       <button class="ghost" @click="router.push('/rank')">排行</button>
       <button class="ghost" @click="router.push('/bag')">背包</button>
       <button class="ghost" @click="router.push('/hzmj-lab')">麻将四联调试</button>
+      <button class="ghost" @click="router.push('/ddz-lab')">斗地主三联调试</button>
     </div>
   </section>
 

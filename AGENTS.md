@@ -10,7 +10,7 @@
 - **单机房单实例**：目标 CCU ≥ 20000；HTTP/WSS 走 IOCP，禁止按连接 detach 线程。
 - **协议**：长连接帧 `uint32 LE len | uint32 LE msg_id | protobuf`；Admin / 部分短连接用 HTTPS+JSON。
 - **货币**：金币 + 钻石；支付为支付宝 APP（当前沙箱）；无房卡、无冲榜。
-- **匹配/对局自研**。斗地主 msg_id 2000–2999；杭州麻将 6000–6999。
+- **首发玩法**：斗地主经典简单规则；匹配/对局自研。
 - **存储**：MySQL 单主库（权威数据）；Redis 仅缓存/会话/开关，**可重建**。
 
 ## 仓库地图
@@ -28,7 +28,7 @@ server/               # C++ pandora-server（MSVC / CMake）
   sql/                # schema.sql
   scripts/            # build.ps1、*_smoke.mjs、ccu_load.mjs
   tests/              # hzmj_table_test、hzmj_rules_test、ddz_cards_test
-game-web/             # Vue3 游戏客户端（联调/演示，端口 5173）
+game-web/             # Vue3 游戏客户端（联调/演示，端口 5173；/hzmj-lab 四联、/ddz-lab 三联）
 admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
 docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```

@@ -644,6 +644,17 @@ export function cardLabel(card: number): string {
   return suits[Math.floor(card / 13) % 4]! + ranks[card % 13]!
 }
 
+/** Sort for display: 3..A,2 then jokers; same rank by suit. */
+export function sortDdzHand(cards: number[]): number[] {
+  const rankKey = (c: number) => (c >= 52 ? 100 + (c - 52) : c % 13)
+  const suitKey = (c: number) => (c >= 52 ? 0 : Math.floor(c / 13) % 4)
+  return [...cards].sort((a, b) => {
+    const dr = rankKey(a) - rankKey(b)
+    if (dr !== 0) return dr
+    return suitKey(a) - suitKey(b)
+  })
+}
+
 /** Hangzhou mahjong TileId 0..33 */
 export function tileLabel(tile: number): string {
   if (tile < 0 || tile > 33) return '?'

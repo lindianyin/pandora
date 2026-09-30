@@ -33,6 +33,11 @@ const router = createRouter({
       component: () => import('./views/HzmjLabView.vue'),
     },
     {
+      path: '/ddz-lab',
+      name: 'ddz-lab',
+      component: () => import('./views/DdzLabView.vue'),
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),
