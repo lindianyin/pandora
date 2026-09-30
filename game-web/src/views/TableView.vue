@@ -12,6 +12,7 @@ const {
   wsOk,
   roomId,
   roomPhase,
+  ddzRoundId,
   landlordSeat,
   bottom,
   hand,
@@ -55,7 +56,7 @@ function seatLabel(seatId: number | undefined) {
 <template>
   <section class="card profile">
     <div>UID: {{ uid }} · {{ nickname }} · 金币 {{ gold }} / 钻石 {{ diamond }}</div>
-    <div>WSS: {{ wsOk ? '已鉴权' : '未鉴权' }} · 房间 #{{ roomId }} · {{ roomPhase || turnPhase || '-' }}</div>
+    <div>WSS: {{ wsOk ? '已鉴权' : '未鉴权' }} · 房间 #{{ roomId }}<span v-if="ddzRoundId"> · 局 {{ ddzRoundId }}</span> · {{ roomPhase || turnPhase || '-' }}</div>
   </section>
 
   <div v-if="errorBanner" class="banner err">{{ errorBanner }}</div>

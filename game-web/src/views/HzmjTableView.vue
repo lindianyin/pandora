@@ -33,6 +33,7 @@ const {
   hzmjBanker,
   hzmjLian,
   hzmjN,
+  hzmjRoundId,
   hzmjWall,
   hzmjSub,
   hzmjPiaoSeat,
@@ -98,7 +99,7 @@ function faceText(m: HzmjMeld, t: number) {
     <div>UID: {{ uid }} · {{ nickname }} · 金币 {{ gold }} / 钻石 {{ diamond }}</div>
     <div>
       WSS: {{ wsOk ? '已连接' : '未连接' }} · 房间 #{{ roomId }} · {{ roomPhase || hzmjSub || '-' }}
-      · 余牌 {{ hzmjWall }} · N={{ hzmjN }} · 连庄 {{ hzmjLian }}
+      · 余牌 {{ hzmjWall }} · N={{ hzmjN }} · 局 {{ hzmjRoundId || '-' }} · 连庄 {{ hzmjLian }}
     </div>
   </section>
 

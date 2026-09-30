@@ -54,6 +54,13 @@ export function pushDiscardRiver(river: number[], tile: number): number[] {
   return [...river, tile]
 }
 
+/** Reconnect replay of a discard already in the live river: do not append twice. */
+export function restoreDiscardRiver(river: number[], tile: number): number[] {
+  if (tile < 0) return river
+  if (river.length > 0 && river[river.length - 1] === tile) return river
+  return pushDiscardRiver(river, tile)
+}
+
 /** Claim takes the discarder's last matching tile out of the river. */
 export function takeClaimedFromRiver(river: number[], tile: number): number[] {
   if (tile < 0 || river.length === 0) return river

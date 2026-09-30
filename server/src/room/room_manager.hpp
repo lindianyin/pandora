@@ -57,6 +57,8 @@ class DdzClassicSimple {
 
   bool Finished() const { return finished_; }
 
+  int64_t RoundId() const { return round_id_; }
+
   const std::string& Phase() const { return phase_; }
 
   int CurrentSeat() const { return current_seat_; }

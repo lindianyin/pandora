@@ -4,6 +4,7 @@ import {
   meldKindLabel,
   pushDiscardRiver,
   resolveMeldTiles,
+  restoreDiscardRiver,
   takeClaimedFromRiver,
 } from './hzmjFront'
 
@@ -35,5 +36,11 @@ describe('hzmjFront discard river', () => {
     expect(r).toEqual([18, 19, 18])
     r = takeClaimedFromRiver(r, 18)
     expect(r).toEqual([18, 19])
+  })
+
+  it('restoreDiscardRiver keeps a river that already ends with the tile', () => {
+    expect(restoreDiscardRiver([2, 32], 32)).toEqual([2, 32])
+    expect(restoreDiscardRiver([2], 32)).toEqual([2, 32])
+    expect(restoreDiscardRiver([], 32)).toEqual([32])
   })
 })

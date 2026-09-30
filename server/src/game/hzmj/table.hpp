@@ -75,6 +75,7 @@ class HzmjTable {
   Phase phase() const { return phase_; }
   PlaySub sub() const { return sub_; }
   int turn_seat() const { return turn_seat_; }
+  bool can_zimo() const { return can_zimo_; }
   int banker_seat() const { return banker_seat_; }
   int lian_zhuang() const { return lian_zhuang_; }
   int wall_remain() const { return static_cast<int>(wall_.size()); }

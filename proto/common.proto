@@ -41,3 +41,12 @@ message S2C_Error {
   string message = 2;
   uint32 ref_msg_id = 3;
 }
+
+// msg_id = 9001  debug: client round trace, server appends it to the log file
+message C2S_ClientTrace {
+  int64 round_id = 1;
+  int32 seat_id = 2;
+  string event = 3;
+  string detail = 4;
+  string game = 5;  // hzmj | ddz
+}

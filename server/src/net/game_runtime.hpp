@@ -5,6 +5,7 @@
 
 #include "common/config.hpp"
 #include "common/errors.hpp"
+#include "common/log.hpp"
 #include "common/proto_wire.hpp"
 #include "lobby/lobby_service.hpp"
 #include "match/match_service.hpp"
@@ -93,6 +94,18 @@ struct GameRuntime {
         rooms.OnHzmjGang(uid, kind, tile);
         break;
       }
+      case MsgId::kC2S_ClientTrace: {
+        int64_t round_id = 0;
+        int32_t seat = -1;
+        std::string event;
+        std::string detail;
+        std::string game;
+        if (!proto_wire::DecodeC2S_ClientTrace(body, len, round_id, seat, event, detail, game)) break;
+        if (game != "hzmj" && game != "ddz") game = "game";
+        const auto room = rooms.RoomOf(uid);
+        LogRound(round_id, "client", game.c_str(), room ? *room : 0, uid, seat, event, detail);
+        break;
+      }
       default:
         hub.Send(uid, MsgId::kS2C_Error,
                  proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "unsupported msg", msg_id));
@@ -102,4 +115,4 @@ struct GameRuntime {
 };
 
 }  // namespace pandora
-
+

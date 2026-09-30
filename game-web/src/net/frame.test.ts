@@ -7,6 +7,8 @@ import {
   encodeC2S_HzmjDiscard,
   encodeC2S_HzmjAction,
   encodeC2S_HzmjGang,
+  encodeC2S_ClientTrace,
+  decodeS2C_DdzGameStart,
   decodeS2C_HzmjGameStart,
   decodeS2C_HzmjTurn,
   decodeS2C_HzmjDraw,
@@ -75,6 +77,16 @@ describe('Hzmj C2S encode', () => {
   })
 })
 
+describe('round trace', () => {
+  it('encodes client trace and decodes ddz round id', () => {
+    const body = encodeC2S_ClientTrace(42, 1, 'discard', 'tile=3', 'hzmj')
+    expect(body.length).toBeGreaterThan(8)
+    const start = concat(encVarint(1, 0), encVarint(5, 99))
+    expect(decodeS2C_DdzGameStart(start).round_id).toBe(99)
+    expect(decodeS2C_DdzGameStart(start).seat_id).toBe(0)
+  })
+})
+
 describe('decodeS2C_HzmjGameStart', () => {
   it('decodes seat 0 (optional) and packed hand', () => {
     const body = concat(
@@ -126,6 +138,14 @@ describe('decodeS2C_HzmjTurn', () => {
     expect(t.wall_remain).toBe(70)
     expect(t.piao_seat).toBe(-1)
     expect(t.self_hand).toEqual([0, 0, 1, 2])
+    expect(t.can_zimo).toBe(false)
+  })
+
+  it('can_zimo defaults false when omitted and true when set', () => {
+    const off = decodeS2C_HzmjTurn(concat(encString(2, 'discard')))
+    expect(off.can_zimo).toBe(false)
+    const on = decodeS2C_HzmjTurn(concat(encString(2, 'discard'), encVarint(7, 1)))
+    expect(on.can_zimo).toBe(true)
   })
 })
 

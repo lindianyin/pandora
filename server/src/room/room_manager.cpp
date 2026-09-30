@@ -23,6 +23,24 @@ int64_t NowMs() {
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
+std::string JoinIds(const std::vector<int32_t>& ids) {
+  std::ostringstream oss;
+  for (size_t i = 0; i < ids.size(); ++i) {
+    if (i) oss << ',';
+    oss << ids[i];
+  }
+  return oss.str();
+}
+
+int SecondsLeft(std::chrono::steady_clock::time_point deadline) {
+  using namespace std::chrono;
+  const auto now = steady_clock::now();
+  if (now >= deadline) return 0;
+  const auto ms = duration_cast<milliseconds>(deadline - now).count();
+  if (ms <= 0) return 0;
+  return static_cast<int>((ms + 999) / 1000);
+}
+
 }  // namespace
 
 RoomManager::RoomManager(SessionHub& hub, MemoryStore& store, WalletService& wallet, GameConfig cfg)
@@ -193,9 +211,21 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
   if (!room.hzmj) return;
   auto* t = room.hzmj.get();
   const int timeout_s = cfg_.play_timeout_s;
+  auto uid_of = [&](int seat) -> int64_t {
+    if (seat < 0 || seat >= room.seat_count) return 0;
+    return room.seats[static_cast<size_t>(seat)].uid;
+  };
 
   if (ev.type == "GameStart") {
     const int N = t->CurrentN();
+    std::ostringstream hands;
+    hands << "banker=" << t->banker_seat() << " N=" << N << " lian=" << t->lian_zhuang()
+          << " wall=" << t->wall_remain();
+    for (int i = 0; i < room.seat_count; ++i) {
+      hands << " hand" << i << "=" << JoinIds(HandToList(t->seat(i).hand));
+    }
+    LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(t->banker_seat()), t->banker_seat(), "start",
+             hands.str());
     std::vector<int32_t> caishen{hzmj::kBai};
     for (int i = 0; i < room.seat_count; ++i) {
       const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
@@ -217,6 +247,12 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
     if (ev.type == "Piao") sub = "piao";
     if (ev.type == "Turn" && sub.empty()) sub = "discard";
     const int piao = t->piao_active() ? t->piao_seat() : -1;
+    {
+      std::ostringstream detail;
+      detail << "sub=" << sub << " wall=" << t->wall_remain() << " piao=" << piao << " timeout=" << timeout_s;
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(ev.seat), ev.seat,
+               ev.type == "Turn" ? "turn" : sub, detail.str());
+    }
     ArmHzmjDeadline(room);
     for (int i = 0; i < room.seat_count; ++i) {
       const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
@@ -225,14 +261,20 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
       if (ev.type == "ClaimWindow" && !t->SeatNeedsClaimInput(i)) continue;
       std::vector<int32_t> sync_hand;
       if (sub == "discard" && i == ev.seat) sync_hand = HandToList(t->seat(i).hand);
+      const bool can_zimo = (sub == "discard" || sub == "piao") && t->can_zimo();
       auto body =
-          proto_wire::EncodeS2C_HzmjTurn(ev.seat, sub, timeout_s, t->wall_remain(), piao, sync_hand);
+          proto_wire::EncodeS2C_HzmjTurn(ev.seat, sub, timeout_s, t->wall_remain(), piao, sync_hand, can_zimo);
       hub_.Send(uid, MsgId::kS2C_HzmjTurn, body);
     }
     return;
   }
 
   if (ev.type == "Draw") {
+    {
+      std::ostringstream detail;
+      detail << "tile=" << static_cast<int>(ev.tile) << " wall=" << t->wall_remain();
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(ev.seat), ev.seat, "draw", detail.str());
+    }
     for (int i = 0; i < room.seat_count; ++i) {
       const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
       if (!uid) continue;
@@ -243,6 +285,11 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
   }
 
   if (ev.type == "Discard") {
+    {
+      std::ostringstream detail;
+      detail << "tile=" << static_cast<int>(ev.tile);
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(ev.seat), ev.seat, "discard", detail.str());
+    }
     auto body = proto_wire::EncodeS2C_HzmjDiscardBroadcast(ev.seat, ev.tile);
     for (int i = 0; i < room.seat_count; ++i) {
       if (room.seats[static_cast<size_t>(i)].uid)
@@ -272,7 +319,12 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
     }
     std::vector<int32_t> tiles;
     tiles.reserve(ev.tiles.size());
-    for (auto t : ev.tiles) tiles.push_back(static_cast<int32_t>(t));
+    for (auto tile : ev.tiles) tiles.push_back(static_cast<int32_t>(tile));
+    {
+      std::ostringstream detail;
+      detail << "tile=" << static_cast<int>(ev.tile) << " from=" << ev.from_seat << " tiles=" << JoinIds(tiles);
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(ev.seat), ev.seat, ev.type, detail.str());
+    }
     auto body =
         proto_wire::EncodeS2C_HzmjActionBroadcast(ev.seat, act, ev.tile, tiles, ev.from_seat, meld_kind);
     for (int i = 0; i < room.seat_count; ++i) {
@@ -284,6 +336,12 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
   }
 
   if (ev.type == "GangScore") {
+    {
+      std::ostringstream detail;
+      detail << "kind=" << ev.detail;
+      for (int i = 0; i < room.seat_count; ++i) detail << " d" << i << "=" << ev.deltas[static_cast<size_t>(i)];
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, uid_of(ev.seat), ev.seat, "gang_score", detail.str());
+    }
     for (int i = 0; i < room.seat_count; ++i) {
       const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
       const int64_t d = ev.deltas[static_cast<size_t>(i)];
@@ -301,6 +359,11 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
   }
 
   if (ev.type == "LiuJu") {
+    {
+      std::ostringstream detail;
+      detail << "lian=" << t->lian_zhuang();
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, 0, -1, "liuju", detail.str());
+    }
     room.hzmj_banker = t->banker_seat();
     room.hzmj_lian = t->lian_zhuang();
     auto body = proto_wire::EncodeS2C_HzmjLiuJu(t->lian_zhuang());
@@ -360,6 +423,16 @@ void RoomManager::ApplyHzmjSettle(Room& room) {
   room.hzmj_lian = t->lian_zhuang();
 
   const int32_t hu_tile = t->last_hu_tile() == hzmj::kTileInvalid ? -1 : static_cast<int32_t>(t->last_hu_tile());
+  {
+    std::ostringstream detail;
+    detail << "winner=" << winner << " hu=" << hu_tile << " zimo=" << (t->last_hu_zimo() ? 1 : 0)
+           << " shooter=" << t->last_shooter_seat() << " M=" << M << " N=" << N
+           << " contractor=" << plan.contractor_seat;
+    for (int i = 0; i < room.seat_count; ++i) detail << " d" << i << "=" << deltas[static_cast<size_t>(i)];
+    const int64_t winner_uid =
+        (winner >= 0 && winner < room.seat_count) ? room.seats[static_cast<size_t>(winner)].uid : 0;
+    LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, winner_uid, winner, "settle", detail.str());
+  }
   auto body = proto_wire::EncodeS2C_HzmjSettle(room.hzmj_round_id, winner, hu_tile, t->last_hu_zimo(),
                                               t->last_shooter_seat(), M, N, plan.contractor_seat, cfg_.base_score,
                                               entries);
@@ -405,7 +478,12 @@ void RoomManager::TickHzmj(Room& room, std::chrono::steady_clock::time_point now
 
   auto maybe_timeout = [&](int seat) {
     if (seat < 0 || seat >= room.seat_count) return;
-    if (room.seats[static_cast<size_t>(seat)].trusteeship || now >= room.hzmj_deadline) {
+    // Disconnect marks trusteeship but must not skip the remaining countdown.
+    // Auto-play only when the original deadline is due.
+    if (now >= room.hzmj_deadline) {
+      const char* sub = t->sub() == hzmj::PlaySub::kClaimWindow ? "claim" : "discard";
+      LogRound(room.hzmj_round_id, "server", "hzmj", room.room_id, room.seats[static_cast<size_t>(seat)].uid, seat,
+               "timeout", sub);
       t->OnTimeout(seat);
     }
   };
@@ -509,6 +587,12 @@ void RoomManager::OnDisconnect(int64_t uid) {
       seat = i;
     }
   }
+  if (r->hzmj && !r->hzmj_done && seat >= 0) {
+    LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "disconnect",
+             r->hzmj->sub() == hzmj::PlaySub::kClaimWindow ? "claim" : "play");
+  } else if (r->game && !r->game->Finished() && seat >= 0) {
+    LogRound(r->game->RoundId(), "server", "ddz", r->room_id, uid, seat, "disconnect", r->game->Phase());
+  }
   // 鸣牌窗内断线立刻代打过，避免整桌卡死
   if (r->hzmj && !r->hzmj_done && seat >= 0 && r->hzmj->phase() == hzmj::Phase::kPlay &&
       r->hzmj->sub() == hzmj::PlaySub::kClaimWindow && seat != r->hzmj->last_discard_seat()) {
@@ -591,11 +675,18 @@ void RoomManager::OnReconnect(int64_t uid) {
     } else if (t->sub() == hzmj::PlaySub::kPiaoLock) {
       sub = "piao";
     }
-    ArmHzmjDeadline(*r);
     std::vector<int32_t> sync_hand;
     if (sub == "discard" && seat == turn) sync_hand = HandToList(t->seat(seat).hand);
+    const int left = SecondsLeft(r->hzmj_deadline);
+    {
+      std::ostringstream detail;
+      detail << "sub=" << sub << " turn=" << turn << " left=" << left << " wall=" << t->wall_remain()
+             << " hand=" << JoinIds(hand);
+      LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "reconnect", detail.str());
+    }
+    const bool can_zimo = (sub == "discard" || sub == "piao") && t->can_zimo();
     hub_.Send(uid, MsgId::kS2C_HzmjTurn,
-              proto_wire::EncodeS2C_HzmjTurn(turn, sub, cfg_.play_timeout_s, t->wall_remain(), piao, sync_hand));
+              proto_wire::EncodeS2C_HzmjTurn(turn, sub, left, t->wall_remain(), piao, sync_hand, can_zimo));
   }
 }
 
@@ -686,14 +777,19 @@ void RoomManager::OnHzmjAction(int64_t uid, int32_t action, const std::vector<in
   ClearTrusteeshipInRoom(*r, uid);
   int seat = SeatOfUid(*r, uid);
   if (seat < 0) return;
+  {
+    std::ostringstream detail;
+    detail << "action=" << action << " chi=" << JoinIds(chi_hand);
+    LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "cmd_action", detail.str());
+  }
   hzmj::ActionKind act = hzmj::ActionKind::kPass;
   if (action >= 0 && action <= 4) act = static_cast<hzmj::ActionKind>(action);
   // 出牌阶段「胡」= 自摸确认
   if (act == hzmj::ActionKind::kHu && r->hzmj->sub() == hzmj::PlaySub::kDiscard) {
     if (!r->hzmj->OnZimoHu(seat)) {
+      const char* msg = r->hzmj->can_zimo() ? "不能自摸胡：牌型未成胡" : "吃碰之后须出牌，不能自摸";
       hub_.Send(uid, MsgId::kS2C_Error,
-                proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "不能自摸胡：牌型未成胡",
-                                            MsgId::kC2S_HzmjAction));
+                proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), msg, MsgId::kC2S_HzmjAction));
     }
     return;
   }
@@ -728,6 +824,11 @@ void RoomManager::OnHzmjDiscard(int64_t uid, int32_t tile) {
   ClearTrusteeshipInRoom(*r, uid);
   int seat = SeatOfUid(*r, uid);
   if (seat < 0) return;
+  {
+    std::ostringstream detail;
+    detail << "tile=" << tile;
+    LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "cmd_discard", detail.str());
+  }
   if (!r->hzmj->OnDiscard(seat, tile)) {
     hub_.Send(uid, MsgId::kS2C_Error,
               proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "非法出牌",
@@ -749,6 +850,11 @@ void RoomManager::OnHzmjGang(int64_t uid, int32_t kind, int32_t tile) {
   ClearTrusteeshipInRoom(*r, uid);
   int seat = SeatOfUid(*r, uid);
   if (seat < 0) return;
+  {
+    std::ostringstream detail;
+    detail << "kind=" << kind << " tile=" << tile;
+    LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "cmd_gang", detail.str());
+  }
   if (kind == 0) r->hzmj->OnAnGang(seat, tile);
   else r->hzmj->OnBuGang(seat, tile);
 }
@@ -804,7 +910,19 @@ void DdzClassicSimple::DealAndBid() {
 
   for (int i = 0; i < 3; ++i) {
     std::vector<int32_t> hand(hands_[i].begin(), hands_[i].end());
-    rooms_.SendToUid(uids_[i], MsgId::kS2C_DdzGameStart, proto_wire::EncodeS2C_DdzGameStart(i, hand, -1, {}));
+    rooms_.SendToUid(uids_[i], MsgId::kS2C_DdzGameStart,
+                     proto_wire::EncodeS2C_DdzGameStart(i, hand, -1, {}, round_id_));
+  }
+  {
+    std::ostringstream detail;
+    detail << "phase=Bid";
+    for (int i = 0; i < 3; ++i) {
+      std::vector<int32_t> hand(hands_[i].begin(), hands_[i].end());
+      detail << " hand" << i << "=" << JoinIds(hand);
+    }
+    std::vector<int32_t> bot(bottom_.begin(), bottom_.end());
+    detail << " bottom=" << JoinIds(bot);
+    LogRound(round_id_, "server", "ddz", room_id_, uids_[0], 0, "deal", detail.str());
   }
   BroadcastTurn();
 }
@@ -813,6 +931,8 @@ void DdzClassicSimple::BroadcastTurn() {
   const int timeout = phase_ == "Bid" ? cfg_.bid_timeout_s : cfg_.play_timeout_s;
   const auto body = proto_wire::EncodeS2C_DdzTurn(current_seat_, phase_, timeout);
   for (int64_t uid : AllUids()) rooms_.SendToUid(uid, MsgId::kS2C_DdzTurn, body);
+  LogRound(round_id_, "server", "ddz", room_id_, uids_[current_seat_], current_seat_, "turn",
+           "phase=" + phase_ + " timeout=" + std::to_string(timeout));
   deadline_ = std::chrono::steady_clock::now() + std::chrono::seconds(timeout);
 }
 
@@ -828,6 +948,7 @@ void DdzClassicSimple::OnBid(int seat, int score) {
                      proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "bid too low", MsgId::kC2S_DdzBid));
     return;
   }
+  LogRound(round_id_, "server", "ddz", room_id_, uids_[seat], seat, "bid", "score=" + std::to_string(score));
   const auto body = proto_wire::EncodeS2C_DdzBidBroadcast(seat, score);
   for (int64_t uid : AllUids()) rooms_.SendToUid(uid, MsgId::kS2C_DdzBidBroadcast, body);
 
@@ -864,7 +985,15 @@ void DdzClassicSimple::FinishBid() {
     std::vector<int32_t> hand(hands_[i].begin(), hands_[i].end());
     std::vector<int32_t> bot(bottom_.begin(), bottom_.end());
     rooms_.SendToUid(uids_[i], MsgId::kS2C_DdzGameStart,
-                     proto_wire::EncodeS2C_DdzGameStart(i, hand, landlord_, bot));
+                     proto_wire::EncodeS2C_DdzGameStart(i, hand, landlord_, bot, round_id_));
+  }
+  {
+    std::ostringstream detail;
+    detail << "landlord=" << landlord_ << " bid=" << bid_score_;
+    std::vector<int32_t> bot(bottom_.begin(), bottom_.end());
+    detail << " bottom=" << JoinIds(bot);
+    LogRound(round_id_, "server", "ddz", room_id_, landlord_ >= 0 ? uids_[landlord_] : 0, landlord_, "play_start",
+             detail.str());
   }
 
   phase_ = "Play";
@@ -889,6 +1018,7 @@ void DdzClassicSimple::OnPlay(int seat, bool pass, const std::vector<int>& cards
                                                    MsgId::kC2S_DdzPlay));
       return;
     }
+    LogRound(round_id_, "server", "ddz", room_id_, uids_[seat], seat, "pass", "");
     const auto body =
         proto_wire::EncodeS2C_DdzPlayBroadcast(seat, true, {}, static_cast<int32_t>(hands_[seat].size()));
     for (int64_t uid : AllUids()) rooms_.SendToUid(uid, MsgId::kS2C_DdzPlayBroadcast, body);
@@ -933,6 +1063,7 @@ void DdzClassicSimple::OnPlay(int seat, bool pass, const std::vector<int>& cards
   passes_ = 0;
 
   std::vector<int32_t> played(cards.begin(), cards.end());
+  LogRound(round_id_, "server", "ddz", room_id_, uids_[seat], seat, "play", "cards=" + JoinIds(played));
   const auto body =
       proto_wire::EncodeS2C_DdzPlayBroadcast(seat, false, played, static_cast<int32_t>(hands_[seat].size()));
   for (int64_t uid : AllUids()) rooms_.SendToUid(uid, MsgId::kS2C_DdzPlayBroadcast, body);
@@ -1016,17 +1147,26 @@ void DdzClassicSimple::DoSettle(bool landlord_win) {
     }
   }
   finished_ = true;
-  PLOG_INFO("settle room=" << room_id_ << " round=" << round_id_ << " mult=" << mult);
+  {
+    std::ostringstream detail;
+    detail << "landlord=" << landlord_ << " win=" << (landlord_win ? 1 : 0) << " mult=" << mult
+           << " base=" << cfg_.base_score;
+    for (int i = 0; i < 3; ++i) detail << " d" << i << "=" << deltas[i];
+    LogRound(round_id_, "server", "ddz", room_id_, landlord_ >= 0 ? uids_[landlord_] : 0, landlord_, "settle",
+             detail.str());
+  }
 }
 
 void DdzClassicSimple::Tick(std::chrono::steady_clock::time_point now) {
   if (finished_) return;
   // Trusteeship: act immediately when it's their turn
   if (rooms_.IsTrusteeship(room_id_, current_seat_)) {
+    LogRound(round_id_, "server", "ddz", room_id_, uids_[current_seat_], current_seat_, "trust_act", phase_);
     AutoActIfTrusted(current_seat_);
     return;
   }
   if (now < deadline_) return;
+  LogRound(round_id_, "server", "ddz", room_id_, uids_[current_seat_], current_seat_, "timeout", phase_);
   AutoActIfTrusted(current_seat_);
 }
 
@@ -1048,7 +1188,9 @@ void DdzClassicSimple::AutoActIfTrusted(int seat) {
 
 int DdzClassicSimple::TimeoutLeftS(std::chrono::steady_clock::time_point now) const {
   if (now >= deadline_) return 0;
-  return static_cast<int>(std::chrono::duration_cast<std::chrono::seconds>(deadline_ - now).count());
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline_ - now).count();
+  if (ms <= 0) return 0;
+  return static_cast<int>((ms + 999) / 1000);
 }
 
 std::vector<int> DdzClassicSimple::HandOf(int seat) const {
@@ -1063,9 +1205,14 @@ void DdzClassicSimple::SendReconnectSnapshot(int64_t uid) {
   if (seat < 0) return;
   std::vector<int32_t> hand(hands_[seat].begin(), hands_[seat].end());
   const int timeout = TimeoutLeftS(std::chrono::steady_clock::now());
+  {
+    std::ostringstream detail;
+    detail << "phase=" << phase_ << " turn=" << current_seat_ << " left=" << timeout
+           << " hand=" << JoinIds(hand);
+    LogRound(round_id_, "server", "ddz", room_id_, uid, seat, "reconnect", detail.str());
+  }
   rooms_.SendToUid(uid, MsgId::kS2C_DdzReconnect,
                    proto_wire::EncodeS2C_DdzReconnect(seat, phase_, hand, landlord_, current_seat_, timeout));
-  BroadcastTurn();
 }
 
 }  // namespace pandora

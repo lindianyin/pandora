@@ -7,6 +7,7 @@ message S2C_DdzGameStart {
   repeated int32 hand_cards = 2;
   int32 landlord_seat = 3;
   repeated int32 bottom_cards = 4;
+  int64 round_id = 5;
 }
 
 // msg_id = 2002

@@ -111,6 +111,8 @@ constexpr uint32_t kS2C_HzmjActionBroadcast = 6007;
 constexpr uint32_t kS2C_HzmjSettle = 6009;
 constexpr uint32_t kS2C_HzmjLiuJu = 6010;
 constexpr uint32_t kC2S_HzmjGang = 6012;
+
+constexpr uint32_t kC2S_ClientTrace = 9001;
 }  // namespace MsgId
 
 }  // namespace pandora

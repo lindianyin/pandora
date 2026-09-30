@@ -16,6 +16,7 @@ import {
   applyMeldBroadcast,
   meldKindLabel,
   pushDiscardRiver,
+  restoreDiscardRiver,
   takeClaimedFromRiver,
   type HzmjMeld,
 } from '../net/hzmjFront'
@@ -73,6 +74,7 @@ const hzmjLian = ref(1)
 const hzmjN = ref(2)
 const hzmjWall = ref(0)
 const hzmjRoundId = ref(0)
+const ddzRoundId = ref(0)
 const hzmjSub = ref('')
 const hzmjPiaoSeat = ref(-1)
 const hzmjLastDiscard = ref<{ seat: number; tile: number } | null>(null)
@@ -102,6 +104,11 @@ let sock: GameSocket | null = null
 let countdownTimer: number | null = null
 let reconnectTimer: number | null = null
 let reconnectAttempts = 0
+let replayingSnapshot = false
+
+function trace(game: 'hzmj' | 'ddz', roundId: number, event: string, detail: string) {
+  sock?.trace(roundId, mySeat.value, game, event, detail)
+}
 
 function pushLog(line: string) {
   const t = new Date().toLocaleTimeString()
@@ -251,6 +258,7 @@ function createSocket(): GameSocket {
     },
     onGameStart: (g) => {
       currentGameId.value = 1
+      if (g.round_id) ddzRoundId.value = g.round_id
       mySeat.value = g.seat_id
       hand.value = [...g.hand_cards]
       landlordSeat.value = g.landlord_seat
@@ -268,16 +276,19 @@ function createSocket(): GameSocket {
         next[g.landlord_seat] = g.landlord_seat === g.seat_id ? g.hand_cards.length : 20
       }
       cardsLeft.value = next
+      trace('ddz', ddzRoundId.value, g.landlord_seat < 0 ? 'deal' : 'play_start', `seat=${g.seat_id} landlord=${g.landlord_seat} hand=${g.hand_cards.join(',')} bottom=${g.bottom_cards.join(',')}`)
     },
     onTurn: (t) => {
       turnSeat.value = t.seat_id
       turnPhase.value = t.phase
       timeoutS.value = t.timeout_s
       startCountdown(t.timeout_s)
+      trace('ddz', ddzRoundId.value, 'turn', `seat=${t.seat_id} phase=${t.phase} timeout=${t.timeout_s}`)
     },
     onBidBroadcast: (b) => {
       lastPlays.value = { ...lastPlays.value, [b.seat_id]: b.score === 0 ? '不叫' : `叫${b.score}分` }
       pushLog(`seat ${b.seat_id} bid ${b.score}`)
+      trace('ddz', ddzRoundId.value, 'bid', `seat=${b.seat_id} score=${b.score}`)
     },
     onPlayBroadcast: (p) => {
       const next = [...cardsLeft.value]
@@ -294,12 +305,15 @@ function createSocket(): GameSocket {
       pushLog(
         p.pass ? `seat ${p.seat_id} pass` : `seat ${p.seat_id} play ${p.cards.map(cardLabel).join(' ')}`,
       )
+      trace('ddz', ddzRoundId.value, p.pass ? 'pass' : 'play', `seat=${p.seat_id} cards=${p.cards.join(',')} left=${p.cards_left}`)
     },
     onSettle: (s) => {
       settle.value = s
       showSettle.value = true
       clearCountdown()
       pushLog(`settle base=${s.base_score} x${s.multiplier}`)
+      if (s.round_id) ddzRoundId.value = s.round_id
+      trace('ddz', s.round_id, 'settle', `base=${s.base_score} mult=${s.multiplier}`)
       sock?.getLobby()
     },
     onReconnect: (r) => {
@@ -316,6 +330,7 @@ function createSocket(): GameSocket {
       startCountdown(r.timeout_s)
       reconnectHint.value = '已重连，手牌已恢复'
       pushLog(`reconnect restored hand=${r.hand.length} phase=${r.phase}`)
+      trace('ddz', ddzRoundId.value, 'reconnect', `phase=${r.phase} turn=${r.current_seat} left=${r.timeout_s} hand=${r.hand.join(',')}`)
       if (roomId.value) goTable(roomId.value, 1)
     },
     onHzmjGameStart: (g) => {
@@ -334,11 +349,12 @@ function createSocket(): GameSocket {
       hzmjWall.value = g.wall_remain
       hzmjBaseScore.value = g.base_score
       hzmjMelds.value = {}
+      replayingSnapshot = sameRound
       if (!sameRound) {
         hzmjRivers.value = {}
         hzmjLastDiscard.value = null
+        lastPlays.value = {}
       }
-      lastPlays.value = {}
       showHzmjSettle.value = false
       showLiuJu.value = false
       hzmjSettle.value = null
@@ -346,16 +362,25 @@ function createSocket(): GameSocket {
       hzmjClaimSent.value = false
       hzmjClaimHint.value = ''
       roomPhase.value = 'Play'
-      const next = [13, 13, 13, 13]
-      next[g.banker_seat] = 14
-      next[g.self_seat] = g.self_hand.length
-      cardsLeft.value = next
+      if (sameRound) {
+        const next = [...cardsLeft.value]
+        next[g.self_seat] = g.self_hand.length
+        cardsLeft.value = next
+      } else {
+        const next = [13, 13, 13, 13]
+        next[g.banker_seat] = 14
+        next[g.self_seat] = g.self_hand.length
+        cardsLeft.value = next
+      }
+      hzmjCanZimo.value = false
       goTable(roomId.value, 2)
       pushLog(`hzmj start banker=${g.banker_seat} N=${g.N} hand=${g.self_hand.length}`)
+      trace('hzmj', hzmjRoundId.value, sameRound ? 'resync' : 'start', `banker=${g.banker_seat} N=${g.N} wall=${g.wall_remain} hand=${g.self_hand.join(',')}`)
     },
     onHzmjTurn: (t) => {
       turnSeat.value = t.seat_id
       hzmjSub.value = t.sub
+      hzmjCanZimo.value = !!t.can_zimo && t.seat_id === mySeat.value
       turnPhase.value = t.sub
       hzmjWall.value = t.wall_remain
       hzmjPiaoSeat.value = t.piao_seat
@@ -377,6 +402,8 @@ function createSocket(): GameSocket {
         hzmjClaimHint.value = ''
         selectedHandIndex.value = null
       }
+      replayingSnapshot = false
+      trace('hzmj', hzmjRoundId.value, 'turn', `seat=${t.seat_id} sub=${t.sub} timeout=${t.timeout_s} wall=${t.wall_remain} hand=${(t.self_hand || []).join(',')}`)
     },
     onHzmjDraw: (d) => {
       hzmjClaimSent.value = false
@@ -390,14 +417,23 @@ function createSocket(): GameSocket {
       cardsLeft.value = next
       if (hzmjWall.value > 0) hzmjWall.value -= 1
       lastPlays.value = { ...lastPlays.value, [d.seat_id]: '摸牌' }
+      trace('hzmj', hzmjRoundId.value, 'draw', `seat=${d.seat_id} tile=${d.tile}`)
     },
     onHzmjDiscard: (d) => {
       hzmjClaimSent.value = false
       hzmjLastDiscard.value = { seat: d.seat_id, tile: d.tile }
       lastPlays.value = { ...lastPlays.value, [d.seat_id]: tileLabel(d.tile) }
       const rivers = { ...hzmjRivers.value }
-      rivers[d.seat_id] = pushDiscardRiver(rivers[d.seat_id] || [], d.tile)
+      const prev = rivers[d.seat_id] || []
+      rivers[d.seat_id] = replayingSnapshot
+        ? restoreDiscardRiver(prev, d.tile)
+        : pushDiscardRiver(prev, d.tile)
       hzmjRivers.value = rivers
+      if (replayingSnapshot) {
+        pushLog(`seat ${d.seat_id} discard ${tileLabel(d.tile)}`)
+        trace('hzmj', hzmjRoundId.value, 'discard', `seat=${d.seat_id} tile=${d.tile}`)
+        return
+      }
       if (d.seat_id === mySeat.value) {
         hzmjSub.value = ''
         const r = applySelfDiscard(hand.value, d.tile)
@@ -414,6 +450,7 @@ function createSocket(): GameSocket {
         cardsLeft.value = next
       }
       pushLog(`seat ${d.seat_id} discard ${tileLabel(d.tile)}`)
+      trace('hzmj', hzmjRoundId.value, 'discard', `seat=${d.seat_id} tile=${d.tile}`)
     },
     onHzmjAction: (a) => {
       hzmjClaimSent.value = false
@@ -433,11 +470,16 @@ function createSocket(): GameSocket {
           a.from_seat ?? -1,
         )
         hzmjMelds.value = melds
-        if (a.from_seat >= 0 && a.tile >= 0 && kind !== 4) {
+        if (!replayingSnapshot && a.from_seat >= 0 && a.tile >= 0 && kind !== 4) {
           const rivers = { ...hzmjRivers.value }
           rivers[a.from_seat] = takeClaimedFromRiver(rivers[a.from_seat] || [], a.tile)
           hzmjRivers.value = rivers
         }
+      }
+      if (replayingSnapshot) {
+        pushLog(`seat ${a.seat_id} ${text}`)
+        trace('hzmj', hzmjRoundId.value, 'action', `seat=${a.seat_id} act=${a.action} kind=${a.meld_kind} tile=${a.tile} from=${a.from_seat}`)
+        return
       }
       if (a.action === 2 && a.seat_id === mySeat.value && a.tile >= 0) {
         let h = hand.value
@@ -476,6 +518,7 @@ function createSocket(): GameSocket {
         cardsLeft.value = next
       }
       pushLog(`seat ${a.seat_id} ${text}`)
+      trace('hzmj', hzmjRoundId.value, 'action', `seat=${a.seat_id} act=${a.action} kind=${a.meld_kind} tile=${a.tile} from=${a.from_seat}`)
     },
     onHzmjSettle: (s) => {
       hzmjSettle.value = s
@@ -488,6 +531,7 @@ function createSocket(): GameSocket {
         if (e.uid === uid.value) gold.value += e.delta_gold
       }
       sock?.getLobby()
+      trace('hzmj', hzmjRoundId.value, 'settle', `zimo=${s.is_zimo ? 1 : 0} hu=${s.hu_tile} M=${s.M} N=${s.N} shooter=${s.shooter_seat}`)
     },
     onHzmjLiuJu: (s) => {
       hzmjLian.value = s.lian_zhuang
@@ -497,6 +541,7 @@ function createSocket(): GameSocket {
       hzmjSub.value = ''
       roomPhase.value = 'WaitReady'
       pushLog(`流局 连庄=${s.lian_zhuang}`)
+      trace('hzmj', hzmjRoundId.value, 'liuju', `lian=${s.lian_zhuang}`)
     },
     onError: (e) => {
       let msg = e.message || `错误 ${e.code}`
@@ -509,6 +554,9 @@ function createSocket(): GameSocket {
       errorBanner.value = msg
       clearErrorSoon()
       pushLog(`err: ${msg}`)
+      const game = currentGameId.value === 2 ? 'hzmj' : 'ddz'
+      const roundId = game === 'hzmj' ? hzmjRoundId.value : ddzRoundId.value
+      trace(game, roundId, 'error', `code=${e.code} ref=${e.ref_msg_id} ${msg}`)
       if (e.ref_msg_id === 6006 || e.ref_msg_id === 6004) {
         hzmjClaimSent.value = false
         if (hzmjSub.value === 'claim') hzmjClaimHint.value = msg
@@ -596,8 +644,12 @@ const canClaimHu = computed(() =>
     (hzmjMelds.value[mySeat.value] || []).length,
   ),
 )
+const hzmjCanZimo = ref(false)
 const canZimoHu = computed(
-  () => isHzmjDiscardTurn.value && canHuHand(hand.value, (hzmjMelds.value[mySeat.value] || []).length),
+  () =>
+    isHzmjDiscardTurn.value &&
+    hzmjCanZimo.value &&
+    canHuHand(hand.value, (hzmjMelds.value[mySeat.value] || []).length),
 )
 
 async function checkHealth() {
@@ -683,6 +735,7 @@ function doReady() {
 }
 
 function doBid(score: number) {
+  trace('ddz', ddzRoundId.value, 'cmd_bid', `score=${score}`)
   sock?.bid(score)
 }
 
@@ -697,10 +750,12 @@ function selectTile(idx: number) {
 }
 
 function doPlay() {
+  trace('ddz', ddzRoundId.value, 'cmd_play', `cards=${selected.value.join(',')}`)
   sock?.play(false, selected.value)
 }
 
 function doPass() {
+  trace('ddz', ddzRoundId.value, 'cmd_pass', '')
   sock?.play(true, [])
 }
 
@@ -722,6 +777,7 @@ function doHzmjDiscard() {
     return
   }
   pushLog(`discard ${tileLabel(tile)}`)
+  trace('hzmj', hzmjRoundId.value, 'cmd_discard', `tile=${tile}`)
   sock.hzmjDiscard(tile)
 }
 
@@ -733,6 +789,7 @@ function doHzmjAction(action: number) {
   }
   if (action === 4 && canZimoHu.value) {
     pushLog('自摸')
+    trace('hzmj', hzmjRoundId.value, 'cmd_action', 'action=4 zimo')
     sock.hzmjAction(4)
     return
   }
@@ -757,16 +814,19 @@ function doHzmjAction(action: number) {
     const opts = listChiOptions(hand.value, claimTile.value)
     if (opts[0]) chi = [...opts[0].handTiles]
   }
+  trace('hzmj', hzmjRoundId.value, 'cmd_action', `action=${action} chi=${chi.join(',')}`)
   sock.hzmjAction(action, chi)
 }
 
 function doHzmjAnGang(tile: number) {
   if (!sock || !wsOk.value) return
+  trace('hzmj', hzmjRoundId.value, 'cmd_gang', `kind=0 tile=${tile}`)
   sock.hzmjGang(0, tile)
 }
 
 function doHzmjBuGang(tile: number) {
   if (!sock || !wsOk.value) return
+  trace('hzmj', hzmjRoundId.value, 'cmd_gang', `kind=1 tile=${tile}`)
   sock.hzmjGang(1, tile)
 }
 
@@ -857,6 +917,8 @@ export function useGameSession() {
     hzmjBanker,
     hzmjLian,
     hzmjN,
+    hzmjRoundId,
+    ddzRoundId,
     hzmjWall,
     hzmjSub,
     hzmjPiaoSeat,

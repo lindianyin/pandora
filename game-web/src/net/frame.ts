@@ -33,6 +33,7 @@ export const MsgId = {
   S2C_HzmjSettle: 6009,
   S2C_HzmjLiuJu: 6010,
   C2S_HzmjGang: 6012,
+  C2S_ClientTrace: 9001,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {
@@ -160,6 +161,24 @@ function readVarintBig(buf: Uint8Array, pos: { i: number }): bigint {
 
 export function encodeC2S_Auth(token: string): Uint8Array {
   return encodeStringField(1, token)
+}
+
+export function encodeC2S_ClientTrace(
+  roundId: number,
+  seatId: number,
+  event: string,
+  detail: string,
+  game: string,
+): Uint8Array {
+  const ev = event.slice(0, 40)
+  const text = detail.replace(/[\r\n\t]/g, ' ').slice(0, 500)
+  return concat(
+    encodeInt64Field(1, roundId),
+    encodeVarintField(2, seatId),
+    encodeStringField(3, ev),
+    encodeStringField(4, text),
+    encodeStringField(5, game),
+  )
 }
 
 export function encodeC2S_Heartbeat(clientTimeMs: number): Uint8Array {
@@ -379,9 +398,11 @@ export function decodeS2C_DdzGameStart(body: Uint8Array): {
   hand_cards: number[]
   landlord_seat: number
   bottom_cards: number[]
+  round_id: number
 } {
   let seat_id = 0
   let landlord_seat = -1
+  let round_id = 0
   const hand_cards: number[] = []
   const bottom_cards: number[] = []
   const pos = { i: 0 }
@@ -396,6 +417,7 @@ export function decodeS2C_DdzGameStart(body: Uint8Array): {
       if (fn === 2) hand_cards.push(v)
       if (fn === 3) landlord_seat = asSigned64(raw)
       if (fn === 4) bottom_cards.push(v)
+      if (fn === 5) round_id = v
     } else if (wt === 2) {
       const len = readVarint(body, pos)
       const end = pos.i + len
@@ -404,7 +426,7 @@ export function decodeS2C_DdzGameStart(body: Uint8Array): {
       else pos.i = end
     } else break
   }
-  return { seat_id, hand_cards, landlord_seat, bottom_cards }
+  return { seat_id, hand_cards, landlord_seat, bottom_cards, round_id }
 }
 
 export function decodeS2C_DdzTurn(body: Uint8Array): { seat_id: number; phase: string; timeout_s: number } {
@@ -727,12 +749,14 @@ export function decodeS2C_HzmjTurn(body: Uint8Array): {
   wall_remain: number
   piao_seat: number
   self_hand: number[]
+  can_zimo: boolean
 } {
   let seat_id = 0
   let sub = ''
   let timeout_s = 0
   let wall_remain = 0
   let piao_seat = -1
+  let can_zimo = false
   const self_hand: number[] = []
   const pos = { i: 0 }
   while (pos.i < body.length) {
@@ -747,6 +771,7 @@ export function decodeS2C_HzmjTurn(body: Uint8Array): {
       if (fn === 4) wall_remain = v
       if (fn === 5) piao_seat = asSigned64(raw)
       if (fn === 6) self_hand.push(v)
+      if (fn === 7) can_zimo = v !== 0
     } else if (wt === 2) {
       const len = readVarint(body, pos)
       const end = pos.i + len
@@ -758,7 +783,7 @@ export function decodeS2C_HzmjTurn(body: Uint8Array): {
       } else pos.i = end
     } else break
   }
-  return { seat_id, sub, timeout_s, wall_remain, piao_seat, self_hand }
+  return { seat_id, sub, timeout_s, wall_remain, piao_seat, self_hand, can_zimo }
 }
 
 export function decodeS2C_HzmjDraw(body: Uint8Array): { seat_id: number; tile: number } {

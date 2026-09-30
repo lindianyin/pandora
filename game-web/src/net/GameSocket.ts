@@ -14,6 +14,7 @@ import {
   encodeC2S_HzmjDiscard,
   encodeC2S_HzmjAction,
   encodeC2S_HzmjGang,
+  encodeC2S_ClientTrace,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
   decodeS2C_MatchStatus,
@@ -53,6 +54,7 @@ export type GameHandlers = {
     hand_cards: number[]
     landlord_seat: number
     bottom_cards: number[]
+    round_id: number
   }) => void
   onTurn?: (s: { seat_id: number; phase: string; timeout_s: number }) => void
   onBidBroadcast?: (s: { seat_id: number; score: number }) => void
@@ -86,6 +88,7 @@ export type GameHandlers = {
     wall_remain: number
     piao_seat: number
     self_hand: number[]
+    can_zimo: boolean
   }) => void
   onHzmjDraw?: (s: { seat_id: number; tile: number }) => void
   onHzmjDiscard?: (s: { seat_id: number; tile: number }) => void
@@ -170,6 +173,10 @@ export class GameSocket {
   }
   hzmjGang(kind: number, tile: number) {
     this.send(MsgId.C2S_HzmjGang, encodeC2S_HzmjGang(kind, tile))
+  }
+  trace(roundId: number, seatId: number, game: string, event: string, detail: string) {
+    if (roundId <= 0) return
+    this.send(MsgId.C2S_ClientTrace, encodeC2S_ClientTrace(roundId, seatId, event, detail, game))
   }
 
   private onFrame(msgId: number, body: Uint8Array) {

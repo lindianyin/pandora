@@ -52,6 +52,7 @@ function seatMelds(seatId: number): HzmjMeld[] {
       <span v-else>offline</span>
       <span v-if="c.mySeat.value >= 0">座{{ c.mySeat.value }}</span>
       <span v-if="c.mySeat.value === c.hzmjBanker.value" class="tag">庄</span>
+      <span v-if="c.hzmjRoundId.value" class="tag">局 {{ c.hzmjRoundId.value }}</span>
       <span class="meta">{{ c.roomPhase.value || '-' }} · 牌墙 {{ c.hzmjWall.value }} · N={{ c.hzmjN.value }}</span>
     </div>
     <div v-if="c.errorBanner.value" class="err">{{ c.errorBanner.value }}</div>

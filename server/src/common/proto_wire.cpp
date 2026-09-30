@@ -156,13 +156,26 @@ bool DecodeC2S_DdzPlay(const uint8_t* data, size_t len, bool& pass, std::vector<
 }
 
 std::vector<uint8_t> EncodeS2C_DdzGameStart(int32_t seat_id, const std::vector<int32_t>& hand, int32_t landlord_seat,
-                                            const std::vector<int32_t>& bottom) {
+                                            const std::vector<int32_t>& bottom, int64_t round_id) {
   S2C_DdzGameStart m;
   m.set_seat_id(seat_id);
   for (auto c : hand) m.add_hand_cards(c);
   m.set_landlord_seat(landlord_seat);
   for (auto c : bottom) m.add_bottom_cards(c);
+  m.set_round_id(round_id);
   return Serialize(m);
+}
+
+bool DecodeC2S_ClientTrace(const uint8_t* data, size_t len, int64_t& round_id, int32_t& seat_id, std::string& event,
+                           std::string& detail, std::string& game) {
+  C2S_ClientTrace m;
+  if (!Parse(data, len, m)) return false;
+  round_id = m.round_id();
+  seat_id = m.seat_id();
+  event = m.event();
+  detail = m.detail();
+  game = m.game();
+  return true;
 }
 
 std::vector<uint8_t> EncodeS2C_DdzTurn(int32_t seat_id, const std::string& phase, int32_t timeout_s) {
@@ -297,7 +310,7 @@ std::vector<uint8_t> EncodeS2C_HzmjGameStart(int64_t round_id, int64_t room_id, 
 }
 
 std::vector<uint8_t> EncodeS2C_HzmjTurn(int32_t seat_id, const std::string& sub, int32_t timeout_s, int32_t wall_remain,
-                                        int32_t piao_seat, const std::vector<int32_t>& self_hand) {
+                                        int32_t piao_seat, const std::vector<int32_t>& self_hand, bool can_zimo) {
   S2C_HzmjTurn m;
   m.set_seat_id(seat_id);
   m.set_sub(sub);
@@ -305,6 +318,7 @@ std::vector<uint8_t> EncodeS2C_HzmjTurn(int32_t seat_id, const std::string& sub,
   m.set_wall_remain(wall_remain);
   m.set_piao_seat(piao_seat);
   for (auto t : self_hand) m.add_self_hand(t);
+  m.set_can_zimo(can_zimo);
   return Serialize(m);
 }
 

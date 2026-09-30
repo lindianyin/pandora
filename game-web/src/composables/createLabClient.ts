@@ -16,6 +16,7 @@ import {
   applyMeldBroadcast,
   meldKindLabel,
   pushDiscardRiver,
+  restoreDiscardRiver,
   takeClaimedFromRiver,
   type HzmjMeld,
 } from '../net/hzmjFront'
@@ -65,6 +66,11 @@ export function createLabClient(slot: number, deviceId: string) {
 
   let sock: GameSocket | null = null
   let countdownTimer: number | null = null
+  let replayingSnapshot = false
+
+  function trace(event: string, detail: string) {
+    sock?.trace(hzmjRoundId.value, mySeat.value, 'hzmj', event, detail)
+  }
 
   function pushLog(line: string) {
     const t = new Date().toLocaleTimeString()
@@ -130,9 +136,11 @@ export function createLabClient(slot: number, deviceId: string) {
       (hzmjMelds.value[mySeat.value] || []).length,
     ),
   )
+  const hzmjCanZimo = ref(false)
   const canZimoHu = computed(
     () =>
       isHzmjDiscardTurn.value &&
+      hzmjCanZimo.value &&
       canHuHand(hand.value, (hzmjMelds.value[mySeat.value] || []).length),
   )
   const canReady = computed(() => {
@@ -197,25 +205,35 @@ export function createLabClient(slot: number, deviceId: string) {
         hzmjN.value = g.N
         hzmjWall.value = g.wall_remain
         hzmjMelds.value = {}
+        replayingSnapshot = sameRound
         if (!sameRound) {
           hzmjRivers.value = {}
           hzmjLastDiscard.value = null
+          lastPlays.value = {}
         }
-        lastPlays.value = {}
         showSettle.value = false
         hzmjSettle.value = null
         hzmjClaimSent.value = false
         hzmjSub.value = ''
         roomPhase.value = 'Play'
-        const next = [13, 13, 13, 13]
-        next[g.banker_seat] = 14
-        next[g.self_seat] = g.self_hand.length
-        cardsLeft.value = next
+        if (sameRound) {
+          const next = [...cardsLeft.value]
+          next[g.self_seat] = g.self_hand.length
+          cardsLeft.value = next
+        } else {
+          const next = [13, 13, 13, 13]
+          next[g.banker_seat] = 14
+          next[g.self_seat] = g.self_hand.length
+          cardsLeft.value = next
+        }
+        hzmjCanZimo.value = false
         pushLog(`start seat=${g.self_seat} N=${g.N} hand=${g.self_hand.length}`)
+        trace(sameRound ? 'resync' : 'start', `banker=${g.banker_seat} N=${g.N} wall=${g.wall_remain} hand=${g.self_hand.join(',')}`)
       },
       onHzmjTurn: (t) => {
         turnSeat.value = t.seat_id
         hzmjSub.value = t.sub
+        hzmjCanZimo.value = !!t.can_zimo && t.seat_id === mySeat.value
         hzmjWall.value = t.wall_remain
         startCountdown(t.timeout_s)
         if (t.self_hand && t.self_hand.length > 0) {
@@ -233,6 +251,8 @@ export function createLabClient(slot: number, deviceId: string) {
           hzmjClaimHint.value = ''
           selectedHandIndex.value = null
         }
+        replayingSnapshot = false
+        trace('turn', `seat=${t.seat_id} sub=${t.sub} timeout=${t.timeout_s} wall=${t.wall_remain} hand=${(t.self_hand || []).join(',')}`)
       },
       onHzmjDraw: (d) => {
         if (d.seat_id === mySeat.value && d.tile >= 0) {
@@ -247,13 +267,22 @@ export function createLabClient(slot: number, deviceId: string) {
         cardsLeft.value = next
         if (hzmjWall.value > 0) hzmjWall.value -= 1
         lastPlays.value = { ...lastPlays.value, [d.seat_id]: '\u6478\u724c' }
+        trace('draw', `seat=${d.seat_id} tile=${d.tile}`)
       },
       onHzmjDiscard: (d) => {
         hzmjLastDiscard.value = { seat: d.seat_id, tile: d.tile }
         lastPlays.value = { ...lastPlays.value, [d.seat_id]: tileLabel(d.tile) }
         const rivers = { ...hzmjRivers.value }
-        rivers[d.seat_id] = pushDiscardRiver(rivers[d.seat_id] || [], d.tile)
+        const prev = rivers[d.seat_id] || []
+        rivers[d.seat_id] = replayingSnapshot
+          ? restoreDiscardRiver(prev, d.tile)
+          : pushDiscardRiver(prev, d.tile)
         hzmjRivers.value = rivers
+        if (replayingSnapshot) {
+          pushLog(`seat${d.seat_id} discard ${tileLabel(d.tile)}`)
+          trace('discard', `seat=${d.seat_id} tile=${d.tile}`)
+          return
+        }
         if (d.seat_id === mySeat.value) {
           hzmjSub.value = ''
           const r = applySelfDiscard(hand.value, d.tile)
@@ -270,6 +299,7 @@ export function createLabClient(slot: number, deviceId: string) {
           cardsLeft.value = next
         }
         pushLog(`seat${d.seat_id} discard ${tileLabel(d.tile)}`)
+        trace('discard', `seat=${d.seat_id} tile=${d.tile}`)
       },
       onHzmjAction: (a) => {
         hzmjClaimSent.value = false
@@ -289,16 +319,22 @@ export function createLabClient(slot: number, deviceId: string) {
             a.from_seat ?? -1,
           )
           hzmjMelds.value = melds
-          if (a.from_seat >= 0 && a.tile >= 0 && kind !== 4) {
+          if (!replayingSnapshot && a.from_seat >= 0 && a.tile >= 0 && kind !== 4) {
             const rivers = { ...hzmjRivers.value }
             rivers[a.from_seat] = takeClaimedFromRiver(rivers[a.from_seat] || [], a.tile)
             hzmjRivers.value = rivers
           }
         }
+        if (replayingSnapshot) {
+          pushLog(`seat${a.seat_id} ${text}`)
+          trace('action', `seat=${a.seat_id} act=${a.action} kind=${a.meld_kind} tile=${a.tile} from=${a.from_seat}`)
+          return
+        }
         if (a.seat_id === mySeat.value && a.action >= 1 && a.action <= 3) {
           selectedHandIndex.value = null
         }
         pushLog(`seat${a.seat_id} ${text}`)
+        trace('action', `seat=${a.seat_id} act=${a.action} kind=${a.meld_kind} tile=${a.tile} from=${a.from_seat}`)
       },
       onHzmjSettle: (s) => {
         hzmjSettle.value = s
@@ -310,12 +346,14 @@ export function createLabClient(slot: number, deviceId: string) {
           if (e.uid === uid.value) gold.value += e.delta_gold
         }
         sock?.getLobby()
+        trace('settle', `zimo=${s.is_zimo ? 1 : 0} hu=${s.hu_tile} M=${s.M} N=${s.N} shooter=${s.shooter_seat}`)
       },
       onHzmjLiuJu: (s) => {
         showSettle.value = true
         hzmjSub.value = ''
         roomPhase.value = 'WaitReady'
         pushLog(`liuju lian=${s.lian_zhuang}`)
+        trace('liuju', `lian=${s.lian_zhuang}`)
       },
       onError: (e) => {
         let msg = e.message || `err ${e.code}`
@@ -326,6 +364,7 @@ export function createLabClient(slot: number, deviceId: string) {
         clearErrorSoon()
         pushLog(`err: ${msg}`)
         if (e.ref_msg_id === 6006) hzmjClaimSent.value = false
+        trace('error', `code=${e.code} ref=${e.ref_msg_id} ${msg}`)
       },
     })
   }
@@ -380,12 +419,14 @@ export function createLabClient(slot: number, deviceId: string) {
     if (selectedHandIndex.value == null || !sock) return
     const tile = hand.value[selectedHandIndex.value]
     if (tile == null) return
+    trace('cmd_discard', `tile=${tile}`)
     sock.hzmjDiscard(tile)
   }
 
   function doAction(action: number) {
     if (!sock) return
     if (action === 4 && canZimoHu.value && isHzmjDiscardTurn.value) {
+      trace('cmd_action', 'action=4 zimo')
       sock.hzmjAction(4)
       pushLog('\u81ea\u6478')
       return
@@ -397,14 +438,17 @@ export function createLabClient(slot: number, deviceId: string) {
       if (opts[0]) chi = [...opts[0].handTiles]
     }
     hzmjClaimSent.value = true
+    trace('cmd_action', `action=${action} chi=${chi.join(',')}`)
     sock.hzmjAction(action, chi)
   }
 
   function doAnGang(tile: number) {
+    trace('cmd_gang', `kind=0 tile=${tile}`)
     sock?.hzmjGang(0, tile)
   }
 
   function doBuGang(tile: number) {
+    trace('cmd_gang', `kind=1 tile=${tile}`)
     sock?.hzmjGang(1, tile)
   }
 
@@ -449,6 +493,7 @@ export function createLabClient(slot: number, deviceId: string) {
     hzmjBanker,
     hzmjN,
     hzmjWall,
+    hzmjRoundId,
     hzmjSub,
     hzmjLastDiscard,
     hzmjMelds,

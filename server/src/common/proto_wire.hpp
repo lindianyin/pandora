@@ -58,7 +58,7 @@ bool DecodeC2S_DdzBid(const uint8_t* data, size_t len, int32_t& score);
 bool DecodeC2S_DdzPlay(const uint8_t* data, size_t len, bool& pass, std::vector<int32_t>& cards);
 
 std::vector<uint8_t> EncodeS2C_DdzGameStart(int32_t seat_id, const std::vector<int32_t>& hand, int32_t landlord_seat,
-                                            const std::vector<int32_t>& bottom);
+                                            const std::vector<int32_t>& bottom, int64_t round_id);
 std::vector<uint8_t> EncodeS2C_DdzTurn(int32_t seat_id, const std::string& phase, int32_t timeout_s);
 std::vector<uint8_t> EncodeS2C_DdzBidBroadcast(int32_t seat_id, int32_t score);
 std::vector<uint8_t> EncodeS2C_DdzPlayBroadcast(int32_t seat_id, bool pass, const std::vector<int32_t>& cards,
@@ -77,6 +77,9 @@ std::vector<uint8_t> EncodeS2C_FriendNotify(int32_t kind, int64_t from_uid, cons
 std::vector<uint8_t> EncodeS2C_BagUpdate(int32_t item_id, int64_t quantity, const std::string& expire_at,
                                           int32_t reason);
 
+bool DecodeC2S_ClientTrace(const uint8_t* data, size_t len, int64_t& round_id, int32_t& seat_id, std::string& event,
+                           std::string& detail, std::string& game);
+
 bool DecodeC2S_HzmjDiscard(const uint8_t* data, size_t len, int32_t& tile);
 bool DecodeC2S_HzmjAction(const uint8_t* data, size_t len, int32_t& action, std::vector<int32_t>& chi_hand);
 bool DecodeC2S_HzmjGang(const uint8_t* data, size_t len, int32_t& kind, int32_t& tile);
@@ -86,7 +89,7 @@ std::vector<uint8_t> EncodeS2C_HzmjGameStart(int64_t round_id, int64_t room_id, 
                                              const std::vector<int32_t>& self_hand, int32_t wall_remain,
                                              int32_t self_seat, int32_t base_score);
 std::vector<uint8_t> EncodeS2C_HzmjTurn(int32_t seat_id, const std::string& sub, int32_t timeout_s, int32_t wall_remain,
-                                        int32_t piao_seat, const std::vector<int32_t>& self_hand = {});
+                                        int32_t piao_seat, const std::vector<int32_t>& self_hand, bool can_zimo);
 std::vector<uint8_t> EncodeS2C_HzmjDraw(int32_t seat_id, int32_t tile);
 std::vector<uint8_t> EncodeS2C_HzmjDiscardBroadcast(int32_t seat_id, int32_t tile);
 std::vector<uint8_t> EncodeS2C_HzmjActionBroadcast(int32_t seat_id, int32_t action, int32_t tile,

@@ -1138,10 +1138,12 @@ void TestNoZimoAfterPeng() {
   t.SetHandForTest(3, Filler13(109));
   t.SetWallForTest({7});
   t.Start();
+  Expect(t.can_zimo(), "banker deal can zimo");
   Expect(t.OnDiscard(0, 5), "discard for peng");
   Expect(t.OnAction(1, ActionKind::kPeng, nullptr), "peng");
   PassClaims(t);
   Expect(t.turn_seat() == 1, "penger turn");
+  Expect(!t.can_zimo(), "peng turn cannot zimo");
   Expect(!t.OnZimoHu(1), "no zimo without draw");
 }
 

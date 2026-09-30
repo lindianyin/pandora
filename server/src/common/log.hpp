@@ -74,3 +74,17 @@ inline void EnsureLogger() { InitLogging(); }
     _plog_ss << msg;                                                            \
     spdlog::error("{}", _plog_ss.str());                                        \
   } while (0)
+
+// One-line round log. Filter with round=<id>. src is server or client.
+inline void LogRound(int64_t round_id, const char* src, const char* game, int64_t room_id, int64_t uid, int seat,
+                     const std::string& event, const std::string& detail) {
+  auto clip = [](std::string s, size_t n) {
+    for (char& c : s) {
+      if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    }
+    if (s.size() > n) s.resize(n);
+    return s;
+  };
+  PLOG_INFO("round=" << round_id << " src=" << src << " game=" << game << " room=" << room_id << " uid=" << uid
+                     << " seat=" << seat << " ev=" << clip(event, 40) << " " << clip(detail, 500));
+}

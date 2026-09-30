@@ -24,6 +24,7 @@ message S2C_HzmjTurn {
   int32 wall_remain = 4;
   int32 piao_seat = 5;
   repeated int32 self_hand = 6;  // 仅发给需要出牌/操作的玩家，权威手牌纠偏
+  bool can_zimo = 7;  // 本回合可自摸：摸牌后或庄家起手；吃碰后为 false
 }
 
 // msg_id = 6003

@@ -145,8 +145,7 @@ void HzmjTable::Start() {
   piao_seat_ = -1;
   last_draw_ = kTileInvalid;
   Emit({"GameStart", banker_seat_, kBai, "fixed_bai"});
-  EnterDiscard(banker_seat_, false);
-  can_zimo_ = true;  // dealt 14 counts as the banker's draw
+  EnterDiscard(banker_seat_, true);  // dealt 14 counts as the banker's draw
 }
 
 void HzmjTable::EnterDiscard(int seat, bool after_draw) {
