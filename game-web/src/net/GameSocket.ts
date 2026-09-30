@@ -259,7 +259,11 @@ export class GameSocket {
     }
     if (msgId === MsgId.S2C_HzmjSettle) {
       const r = decodeS2C_HzmjSettle(body)
-      this.log(`HzmjSettle M=${r.M} N=${r.N} winner=${r.winner_seat}`)
+      this.log(
+        `HzmjSettle ${r.is_zimo ? '自摸' : '点炮'} M=${r.M} N=${r.N} winner=${r.winner_seat}` +
+          (r.is_zimo ? '' : ` shooter=${r.shooter_seat}`) +
+          (r.hu_tile >= 0 ? ` tile=${r.hu_tile}` : ''),
+      )
       this.handlers.onHzmjSettle?.(r)
       return
     }

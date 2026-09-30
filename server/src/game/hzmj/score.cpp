@@ -15,11 +15,12 @@ int ComputeM(const HuResult& hu, int piao_level, int gang_chain) {
   int m = 1;
 
   // caishen series (mutually exclusive highest)
+  // Qi-dui baotou (qi ke) is handled in the qi-dui series, not here.
   int caishen_m = 1;
   if (piao_level >= 3) caishen_m = 16;
   else if (piao_level == 2) caishen_m = 8;
   else if (piao_level == 1) caishen_m = 4;
-  else if (hu.baotou) caishen_m = 2;
+  else if (hu.baotou && hu.kind != HuKind::kQiDui) caishen_m = 2;
   m *= caishen_m;
 
   // gang chain

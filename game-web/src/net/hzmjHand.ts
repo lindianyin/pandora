@@ -102,7 +102,8 @@ function standardWin(counts: number[]): boolean {
   c[BAI] = 0
   let total = jokers0
   for (const n of c) total += n
-  if (total !== 14) return false
+  // Closed 14, or 11/8/5/2 after exposed melds (pair + 3/2/1/0 sets).
+  if (total < 2 || total > 14 || total % 3 !== 2) return false
 
   for (let p = 0; p < 34; p++) {
     if (p === BAI) continue
@@ -165,6 +166,19 @@ export function wouldHu(hand: number[], tile: number, meldCount = 0): boolean {
   return standardWin(c)
 }
 
+/** Current hand already includes the drawn tile (14 / 14-3m) and is a winning shape. */
+export function canHuHand(hand: number[], meldCount = 0): boolean {
+  const expect = 14 - meldCount * 3
+  if (hand.length !== expect) return false
+  const c = new Array<number>(34).fill(0)
+  for (const t of hand) {
+    if (t < 0 || t >= 34) return false
+    c[t]!++
+  }
+  if (qiDuiWin(c, meldCount)) return true
+  return standardWin(c)
+}
+
 /**
  * 点炮胡按钮：对齐服务端 CanDianpao + WouldHu。
  * - N>=8（三牢）
@@ -194,4 +208,17 @@ export function listAnGangTiles(hand: number[]): number[] {
   const counts = new Map<number, number>()
   for (const t of hand) counts.set(t, (counts.get(t) || 0) + 1)
   return [...counts.entries()].filter(([, n]) => n >= 4).map(([t]) => t)
+}
+
+export function listBuGangTiles(
+  hand: number[],
+  melds: { kind: number; tiles: number[] }[],
+): number[] {
+  const out: number[] = []
+  for (const m of melds) {
+    if (m.kind !== 2 || !m.tiles.length) continue
+    const t = m.tiles[0]!
+    if (hand.includes(t) && !out.includes(t)) out.push(t)
+  }
+  return out
 }

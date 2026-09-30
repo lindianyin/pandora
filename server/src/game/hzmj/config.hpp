@@ -15,6 +15,8 @@ struct HzmjConfig {
   bool qiang_gang_hu{true};
   bool lou_hu{true};
   bool piao_block_an_gang{true};
+  // When true, gangs pay immediately and are not also folded into hu M.
+  bool gang_score_instant{false};
 };
 
 // lian_zhuang: 1=平庄, 2=二连, >=3=三牢

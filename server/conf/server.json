@@ -33,7 +33,7 @@
     "bid_timeout_s": 15,
     "play_timeout_s": 20,
     "match_timeout_s": 30,
-    "hzmj_debug_deal": true
+    "hzmj_debug_deal": false
   },
   "exchange": {
     "diamond_to_gold": 1000

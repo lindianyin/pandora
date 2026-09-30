@@ -5,8 +5,10 @@ import { tileLabel, type LobbyTemplate, type RoomSeat, type HzmjSettle } from '.
 import { canChiClaim, canMingGangClaim, canPengClaim, listChiOptions } from '../net/hzmjMeld'
 import {
   applySelfDiscard,
+  canHuHand,
   canShowDianpaoHu,
   listAnGangTiles,
+  listBuGangTiles,
   removeOneTile,
   sortHand,
 } from '../net/hzmjHand'
@@ -107,6 +109,8 @@ export function createLabClient(slot: number, deviceId: string) {
       roomPhase.value === 'Play',
   )
   const anGangCandidates = computed(() => listAnGangTiles(hand.value))
+  const buGangCandidates = computed(() => listBuGangTiles(hand.value, hzmjMelds.value[mySeat.value] || []))
+  const hzmjRoundId = ref(0)
   const claimTile = computed(() => hzmjLastDiscard.value?.tile ?? -1)
   const claimFromSeat = computed(() => hzmjLastDiscard.value?.seat ?? -1)
   const canClaimChi = computed(() =>
@@ -125,6 +129,11 @@ export function createLabClient(slot: number, deviceId: string) {
       hand.value,
       (hzmjMelds.value[mySeat.value] || []).length,
     ),
+  )
+  const canZimoHu = computed(
+    () =>
+      isHzmjDiscardTurn.value &&
+      canHuHand(hand.value, (hzmjMelds.value[mySeat.value] || []).length),
   )
   const canReady = computed(() => {
     const phase = roomPhase.value || ''
@@ -177,6 +186,8 @@ export function createLabClient(slot: number, deviceId: string) {
         if (me) mySeat.value = me.seat_id
       },
       onHzmjGameStart: (g) => {
+        const sameRound = hzmjRoundId.value !== 0 && g.round_id === hzmjRoundId.value
+        hzmjRoundId.value = g.round_id
         roomId.value = g.room_id || roomId.value
         mySeat.value = g.self_seat
         hand.value = sortHand(g.self_hand)
@@ -186,8 +197,10 @@ export function createLabClient(slot: number, deviceId: string) {
         hzmjN.value = g.N
         hzmjWall.value = g.wall_remain
         hzmjMelds.value = {}
-        hzmjRivers.value = {}
-        hzmjLastDiscard.value = null
+        if (!sameRound) {
+          hzmjRivers.value = {}
+          hzmjLastDiscard.value = null
+        }
         lastPlays.value = {}
         showSettle.value = false
         hzmjSettle.value = null
@@ -225,6 +238,9 @@ export function createLabClient(slot: number, deviceId: string) {
         if (d.seat_id === mySeat.value && d.tile >= 0) {
           hand.value = sortHand([...hand.value, d.tile])
           selectedHandIndex.value = hand.value.lastIndexOf(d.tile)
+          pushLog(`摸 ${tileLabel(d.tile)}`)
+        } else if (d.seat_id !== mySeat.value) {
+          pushLog(`seat${d.seat_id} 摸牌`)
         }
         const next = [...cardsLeft.value]
         if (typeof next[d.seat_id] === 'number') next[d.seat_id]! += 1
@@ -368,7 +384,13 @@ export function createLabClient(slot: number, deviceId: string) {
   }
 
   function doAction(action: number) {
-    if (!sock || hzmjClaimSent.value) return
+    if (!sock) return
+    if (action === 4 && canZimoHu.value && isHzmjDiscardTurn.value) {
+      sock.hzmjAction(4)
+      pushLog('\u81ea\u6478')
+      return
+    }
+    if (hzmjClaimSent.value) return
     let chi: number[] = []
     if (action === 1) {
       const opts = listChiOptions(hand.value, claimTile.value)
@@ -380,6 +402,10 @@ export function createLabClient(slot: number, deviceId: string) {
 
   function doAnGang(tile: number) {
     sock?.hzmjGang(0, tile)
+  }
+
+  function doBuGang(tile: number) {
+    sock?.hzmjGang(1, tile)
   }
 
   function leave() {
@@ -437,10 +463,13 @@ export function createLabClient(slot: number, deviceId: string) {
     isHzmjClaim,
     isHzmjDiscardTurn,
     anGangCandidates,
+    buGangCandidates,
+    doBuGang,
     canClaimChi,
     canClaimPeng,
     canClaimGang,
     canClaimHu,
+    canZimoHu,
     login,
     matchHzmj,
     doReady,

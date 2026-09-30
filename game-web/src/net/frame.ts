@@ -860,7 +860,7 @@ export function decodeS2C_HzmjSettle(body: Uint8Array): HzmjSettle {
   let round_id = 0
   let winner_seat = 0
   let hu_tile = -1
-  let is_zimo = true
+  let is_zimo = false // proto3 omits false bool; default must not be true
   let shooter_seat = -1
   let M = 1
   let N = 2

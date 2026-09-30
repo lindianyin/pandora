@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   applySelfDiscard,
+  canHuHand,
   canShowDianpaoHu,
   listAnGangTiles,
+  listBuGangTiles,
   removeOneTile,
   sortHand,
   wouldHu,
@@ -52,5 +54,16 @@ describe('hzmjHand', () => {
   it('listAnGangTiles', () => {
     expect(listAnGangTiles([5, 5, 5, 5, 1])).toEqual([5])
     expect(listAnGangTiles([5, 5, 5])).toEqual([])
+  })
+
+  it('listBuGangTiles', () => {
+    expect(listBuGangTiles([3, 1], [{ kind: 2, tiles: [3, 3, 3] }])).toEqual([3])
+    expect(listBuGangTiles([1], [{ kind: 2, tiles: [3, 3, 3] }])).toEqual([])
+  })
+
+  it('canHuHand exposed melds: 4 sets + pair, not 3 sets + pair', () => {
+    expect(canHuHand([2, 33], 4)).toBe(true)
+    expect(canHuHand([2, 2], 4)).toBe(true)
+    expect(canHuHand([2, 33], 3)).toBe(false)
   })
 })

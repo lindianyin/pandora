@@ -184,4 +184,24 @@ describe('decodeS2C_HzmjSettle', () => {
     expect(s.N).toBe(2)
     expect(s.entries).toEqual([{ uid: 588, seat_id: 0, delta_gold: -200 }])
   })
+
+  it('dianpao: omitted is_zimo field is false, not true', () => {
+    // proto3 skips false bools — body has no field 4
+    const entry = concat(encVarint(1, 1), encVarint(2, 0), encVarint(3, 950))
+    const body = concat(
+      encVarint(1, 1),
+      encVarint(2, 0),
+      encVarint(3, 27),
+      encVarint(5, 1), // shooter
+      encVarint(6, 1),
+      encVarint(7, 8),
+      encVarint(9, 100),
+      encBytes(10, entry),
+    )
+    const s = decodeS2C_HzmjSettle(body)
+    expect(s.is_zimo).toBe(false)
+    expect(s.shooter_seat).toBe(1)
+    expect(s.winner_seat).toBe(0)
+    expect(s.hu_tile).toBe(27)
+  })
 })

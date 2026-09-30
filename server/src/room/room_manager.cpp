@@ -283,6 +283,18 @@ void RoomManager::OnHzmjEvent(Room& room, const hzmj::OutEvent& ev) {
     return;
   }
 
+  if (ev.type == "GangScore") {
+    for (int i = 0; i < room.seat_count; ++i) {
+      const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+      const int64_t d = ev.deltas[static_cast<size_t>(i)];
+      if (!uid || d == 0) continue;
+      const std::string key = "hzmj:gang:" + std::to_string(room.hzmj_round_id) + ":" + ev.detail + ":" +
+                              std::to_string(uid);
+      wallet_.Adjust(uid, Currency::kGold, d, "hzmj_gang", key);
+    }
+    return;
+  }
+
   if (ev.type == "Settle") {
     ApplyHzmjSettle(room);
     return;
@@ -314,14 +326,10 @@ void RoomManager::ApplyHzmjSettle(Room& room) {
     }
   }
 
-  int M = 1;
-  int N = hzmj::ComputeN(room.hzmj_lian, false);
-  // detail is "MxN"
-  // recover from stake: stake = base * M * (something) — use plan.stake / base if divisible
-  if (cfg_.base_score > 0 && plan.stake > 0) {
-    M = plan.stake / cfg_.base_score;
-    if (M < 1) M = 1;
-  }
+  int M = t->last_hu_M();
+  int N = t->last_hu_N();
+  if (M < 1) M = 1;
+  if (N < 1) N = 2;
 
   std::vector<proto_wire::SettleEntry> entries;
   nlohmann::json players = nlohmann::json::array();
@@ -340,18 +348,21 @@ void RoomManager::ApplyHzmjSettle(Room& room) {
     players.push_back({{"uid", uid}, {"seat_id", i}, {"delta", d}});
   }
 
-  // winner seat from positive delta or from event — use max delta seat
-  int winner = 0;
-  for (int i = 1; i < room.seat_count; ++i) {
-    if (deltas[static_cast<size_t>(i)] > deltas[static_cast<size_t>(winner)]) winner = i;
-  }
-  N = hzmj::ComputeN(t->lian_zhuang() > 1 && t->banker_seat() == winner ? t->lian_zhuang() : 1, false);
+  const int winner = [&]() {
+    int w = 0;
+    for (int i = 1; i < room.seat_count; ++i) {
+      if (deltas[static_cast<size_t>(i)] > deltas[static_cast<size_t>(w)]) w = i;
+    }
+    return w;
+  }();
   // After FinishHu, banker/lian already updated — store for next round
   room.hzmj_banker = t->banker_seat();
   room.hzmj_lian = t->lian_zhuang();
 
-  auto body = proto_wire::EncodeS2C_HzmjSettle(room.hzmj_round_id, winner, -1, true, -1, M, N, plan.contractor_seat,
-                                              cfg_.base_score, entries);
+  const int32_t hu_tile = t->last_hu_tile() == hzmj::kTileInvalid ? -1 : static_cast<int32_t>(t->last_hu_tile());
+  auto body = proto_wire::EncodeS2C_HzmjSettle(room.hzmj_round_id, winner, hu_tile, t->last_hu_zimo(),
+                                              t->last_shooter_seat(), M, N, plan.contractor_seat, cfg_.base_score,
+                                              entries);
   for (int i = 0; i < room.seat_count; ++i) {
     if (room.seats[static_cast<size_t>(i)].uid)
       hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_HzmjSettle, body);
@@ -677,6 +688,15 @@ void RoomManager::OnHzmjAction(int64_t uid, int32_t action, const std::vector<in
   if (seat < 0) return;
   hzmj::ActionKind act = hzmj::ActionKind::kPass;
   if (action >= 0 && action <= 4) act = static_cast<hzmj::ActionKind>(action);
+  // 出牌阶段「胡」= 自摸确认
+  if (act == hzmj::ActionKind::kHu && r->hzmj->sub() == hzmj::PlaySub::kDiscard) {
+    if (!r->hzmj->OnZimoHu(seat)) {
+      hub_.Send(uid, MsgId::kS2C_Error,
+                proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "不能自摸胡：牌型未成胡",
+                                            MsgId::kC2S_HzmjAction));
+    }
+    return;
+  }
   hzmj::ChiOption chi{};
   const hzmj::ChiOption* chi_ptr = nullptr;
   if (act == hzmj::ActionKind::kChi && chi_hand.size() >= 2) {

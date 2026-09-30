@@ -98,7 +98,8 @@ bool StandardWin(const HandCount& hand, bool* out_baotou) {
   c[kBai] = 0;
   int total = jokers;
   for (int i = 0; i < 34; ++i) total += c[i];
-  if (total != 14) return false;
+  // Closed 14, or remaining after exposed melds: 11/8/5/2 (pair + 3/2/1/0 sets).
+  if (total < 2 || total > 14 || total % 3 != 2) return false;
 
   // enumerate pair
   for (int p = 0; p < 34; ++p) {
@@ -188,6 +189,8 @@ HuResult CheckQiDui(const HandCount& hand, const std::vector<Meld>& melds) {
   r.kind = HuKind::kQiDui;
   r.haohua = haohua;
   r.qing_qi_dui = !has_caishen;
+  // Qi ke: at least one caishen completes a real singleton into a pair.
+  r.baotou = pairs_needed > 0;
   return r;
 }
 

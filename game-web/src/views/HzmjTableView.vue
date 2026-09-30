@@ -46,10 +46,12 @@ const {
   isHzmjClaim,
   isHzmjDiscardTurn,
   anGangCandidates,
+  buGangCandidates,
   canClaimChi,
   canClaimPeng,
   canClaimGang,
   canClaimHu,
+  canZimoHu,
   hzmjClaimSent,
   hzmjClaimHint,
   doReady,
@@ -57,6 +59,7 @@ const {
   doHzmjDiscard,
   doHzmjAction,
   doHzmjAnGang,
+  doHzmjBuGang,
   backLobby,
   closeSettleStay,
   tileLabel,
@@ -86,7 +89,7 @@ function isCaishen(t: number) {
 }
 
 function faceText(m: HzmjMeld, t: number) {
-  return m.kind === 4 ? '暗' : tileLabel(t)
+  return m.kind === 4 ? '?' : tileLabel(t)
 }
 </script>
 
@@ -94,8 +97,8 @@ function faceText(m: HzmjMeld, t: number) {
   <section class="card profile">
     <div>UID: {{ uid }} · {{ nickname }} · 金币 {{ gold }} / 钻石 {{ diamond }}</div>
     <div>
-      WSS: {{ wsOk ? '已鉴权' : '未鉴权' }} · 房间 #{{ roomId }} · {{ roomPhase || hzmjSub || '-' }}
-      · 牌墙 {{ hzmjWall }} · N={{ hzmjN }} · 连庄 {{ hzmjLian }}
+      WSS: {{ wsOk ? '已连接' : '未连接' }} · 房间 #{{ roomId }} · {{ roomPhase || hzmjSub || '-' }}
+      · 余牌 {{ hzmjWall }} · N={{ hzmjN }} · 连庄 {{ hzmjLian }}
     </div>
   </section>
 
@@ -108,11 +111,11 @@ function faceText(m: HzmjMeld, t: number) {
       <span class="meta">
         财神
         <span v-for="tile in hzmjCaishen" :key="tile" class="cai">{{ tileLabel(tile) }}</span>
-        · 庄座 {{ hzmjBanker }}
-        <span v-if="hzmjPiaoSeat >= 0" class="piao">飘中 seat{{ hzmjPiaoSeat }}</span>
+        · 庄 {{ hzmjBanker }}
+        <span v-if="hzmjPiaoSeat >= 0" class="piao">财飘 seat{{ hzmjPiaoSeat }}</span>
       </span>
       <span v-if="countdown > 0 && hzmjSub" class="cd" :class="{ mine: isMyTurn || isHzmjClaim }">
-        {{ isHzmjClaim ? '鸣牌窗口' : isMyTurn ? '你的回合' : `座位${turnSeat}` }}
+        {{ isHzmjClaim ? '请选择' : isMyTurn ? '请出牌' : `等待${turnSeat}` }}
         · {{ hzmjSub }} · {{ countdown }}s
       </span>
     </div>
@@ -125,7 +128,7 @@ function faceText(m: HzmjMeld, t: number) {
             <span v-if="seatOpposite.seat_id === hzmjBanker" class="tag">庄</span>
           </div>
           <div class="info">
-            剩{{ seatCards(seatOpposite.seat_id) }}
+            {{ seatCards(seatOpposite.seat_id) }}张
             <span v-if="seatOpposite.trusteeship" class="trust">托管</span>
           </div>
           <div class="front">
@@ -164,7 +167,7 @@ function faceText(m: HzmjMeld, t: number) {
               {{ seatLeft.nickname }}
               <span v-if="seatLeft.seat_id === hzmjBanker" class="tag">庄</span>
             </div>
-            <div class="info">剩{{ seatCards(seatLeft.seat_id) }}</div>
+            <div class="info">{{ seatCards(seatLeft.seat_id) }}张</div>
             <div class="front">
               <div v-if="seatMelds(seatLeft.seat_id).length" class="meld-row">
                 <div v-for="(m, mi) in seatMelds(seatLeft.seat_id)" :key="'lm' + mi" class="meld-group">
@@ -196,12 +199,12 @@ function faceText(m: HzmjMeld, t: number) {
 
         <div class="center">
           <div v-if="hzmjLastDiscard" class="discard">
-            出牌 seat{{ hzmjLastDiscard.seat }}
+            打出 seat{{ hzmjLastDiscard.seat }}
             <span class="tile" :class="{ cai: isCaishen(hzmjLastDiscard.tile) }">
               {{ tileLabel(hzmjLastDiscard.tile) }}
             </span>
           </div>
-          <div v-else class="discard muted">等待开局 / 出牌</div>
+          <div v-else class="discard muted">等待出牌</div>
         </div>
 
         <div class="side right">
@@ -210,7 +213,7 @@ function faceText(m: HzmjMeld, t: number) {
               {{ seatRight.nickname }}
               <span v-if="seatRight.seat_id === hzmjBanker" class="tag">庄</span>
             </div>
-            <div class="info">剩{{ seatCards(seatRight.seat_id) }}</div>
+            <div class="info">{{ seatCards(seatRight.seat_id) }}张</div>
             <div class="front">
               <div v-if="seatMelds(seatRight.seat_id).length" class="meld-row">
                 <div v-for="(m, mi) in seatMelds(seatRight.seat_id)" :key="'rm' + mi" class="meld-group">
@@ -248,7 +251,7 @@ function faceText(m: HzmjMeld, t: number) {
             <span v-if="seatSelf.seat_id === hzmjBanker" class="tag">庄</span>
           </div>
           <div class="info">
-            {{ seatSelf.ready ? '已准备' : '未准备' }} · 剩{{ seatCards(seatSelf.seat_id) }}
+            {{ seatSelf.ready ? '已准备' : '未准备' }} · {{ seatCards(seatSelf.seat_id) }}张
             <span v-if="seatSelf.trusteeship" class="trust">托管</span>
           </div>
           <div class="front">
@@ -295,6 +298,7 @@ function faceText(m: HzmjMeld, t: number) {
             {{ iAmReady ? '已准备' : '准备' }}
           </button>
           <template v-if="isHzmjDiscardTurn">
+            <button v-if="canZimoHu" type="button" class="warn" @click="doHzmjAction(4)">自摸</button>
             <button type="button" :disabled="selectedHandIndex == null" @click="doHzmjDiscard">出牌</button>
             <button
               v-for="g in anGangCandidates"
@@ -304,6 +308,15 @@ function faceText(m: HzmjMeld, t: number) {
               @click="doHzmjAnGang(g)"
             >
               暗杠 {{ tileLabel(g) }}
+            </button>
+            <button
+              v-for="g in buGangCandidates"
+              :key="'bugang-' + g"
+              type="button"
+              class="warn"
+              @click="doHzmjBuGang(g)"
+            >
+              补杠 {{ tileLabel(g) }}
             </button>
           </template>
           <template v-if="isHzmjClaim">
@@ -322,7 +335,7 @@ function faceText(m: HzmjMeld, t: number) {
               胡
             </button>
           </template>
-          <button type="button" class="leave" @click="backLobby">回大厅</button>
+          <button type="button" class="leave" @click="backLobby">返回大厅</button>
         </div>
       </div>
     </div>
@@ -330,7 +343,7 @@ function faceText(m: HzmjMeld, t: number) {
 
   <div v-if="showHzmjSettle && hzmjSettle" class="modal-mask">
     <div class="modal">
-      <h3>本局结算</h3>
+      <h3>结算</h3>
       <p>
         底分 {{ hzmjSettle.base_score || hzmjBaseScore }} · M={{ hzmjSettle.M }} · N={{ hzmjSettle.N }}
         · {{ hzmjSettle.is_zimo ? '自摸' : '点炮' }}
@@ -346,8 +359,8 @@ function faceText(m: HzmjMeld, t: number) {
         </li>
       </ul>
       <div class="row">
-        <button @click="doReady">再准备</button>
-        <button class="ghost" @click="backLobby">回大厅</button>
+        <button @click="doReady">再来一局</button>
+        <button class="ghost" @click="backLobby">返回大厅</button>
         <button class="ghost" @click="closeSettleStay">关闭</button>
       </div>
     </div>
@@ -356,10 +369,10 @@ function faceText(m: HzmjMeld, t: number) {
   <div v-if="showLiuJu" class="modal-mask">
     <div class="modal">
       <h3>流局</h3>
-      <p>连庄变为 {{ hzmjLian }}</p>
+      <p>连庄 {{ hzmjLian }}</p>
       <div class="row">
-        <button @click="doReady">再准备</button>
-        <button class="ghost" @click="backLobby">回大厅</button>
+        <button @click="doReady">再来一局</button>
+        <button class="ghost" @click="backLobby">返回大厅</button>
         <button class="ghost" @click="closeSettleStay">关闭</button>
       </div>
     </div>

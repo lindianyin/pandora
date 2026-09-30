@@ -32,6 +32,7 @@ struct OutEvent {
   std::string detail;
   std::vector<TileId> tiles;  // meld faces for Chi/Peng/Gang
   int from_seat{-1};
+  std::array<int64_t, 4> deltas{};  // GangScore instant gold
 };
 
 struct SeatState {
@@ -56,13 +57,17 @@ class HzmjTable {
   void SetSink(Sink sink) { sink_ = std::move(sink); }
   void SetWallForTest(std::vector<TileId> wall);
   void SetHandForTest(int seat, HandCount hand);
-  // 调试局：seat0 听东；庄为 seat1，开局打出东供点炮；并开三牢 N=8
+  void SetMeldsForTest(int seat, std::vector<Meld> melds);
+  void SetTanCountForTest(int actor, int from, int n);
+  // Debug deal: seat0 waits dong; banker=seat1 discards dong; N=8 sanlao
   void ApplyDebugDianpaoDeal();
 
   void Start();  // deal + enter play (banker discards first, no draw)
 
   bool OnDiscard(int seat, TileId tile);
   bool OnAction(int seat, ActionKind act, const ChiOption* chi = nullptr);
+  // Discard-phase zimo confirm (no auto-hu after draw).
+  bool OnZimoHu(int seat);
   bool OnAnGang(int seat, TileId tile);
   bool OnBuGang(int seat, TileId tile);
   void OnTimeout(int seat);
@@ -77,10 +82,18 @@ class HzmjTable {
   bool SeatNeedsClaimInput(int seat) const;
   const SeatState& seat(int s) const { return seats_[static_cast<size_t>(s)]; }
   const SettlePlan& last_settle() const { return last_settle_; }
+  int last_hu_tile() const { return last_hu_tile_; }
+  bool last_hu_zimo() const { return last_hu_zimo_; }
+  int last_shooter_seat() const { return last_shooter_seat_; }
+  int last_hu_M() const { return last_hu_M_; }
+  int last_hu_N() const { return last_hu_N_; }
   bool piao_active() const { return piao_seat_ >= 0; }
   int piao_seat() const { return piao_seat_; }
   TileId last_discard() const { return last_discard_; }
   int last_discard_seat() const { return last_discard_seat_; }
+  TileId last_draw() const { return last_draw_; }
+  bool qiang_pending() const { return qiang_mode_; }
+  const std::array<int64_t, 4>& last_gang_deltas() const { return last_gang_deltas_; }
 
  private:
   void Emit(OutEvent e);
@@ -90,7 +103,10 @@ class HzmjTable {
   void EnterDiscard(int seat, bool after_draw);
   void OpenClaimWindow();
   void ResolveClaims();
-  void FinishHu(int winner, TileId win_tile, bool zimo, int shooter);
+  void FinishHu(int winner, TileId win_tile, bool zimo, int shooter, bool as_gang_kai = false);
+  void EmitGangScore(const char* kind, int seat, int from_seat);
+  void ContinueAfterBuGang(int seat);
+  TileId ZimoWinTile(int seat) const;
   void FinishLiuJu();
   void NextTurnAfterDiscard();
   bool IsCaishen(TileId t) const { return IsCaishenFixedBai(t); }
@@ -106,11 +122,21 @@ class HzmjTable {
   int round_draw_seat_{-1};
   TileId last_discard_{kTileInvalid};
   int last_discard_seat_{-1};
+  TileId last_draw_{kTileInvalid};
   int piao_seat_{-1};
+  bool qiang_mode_{false};
+  bool can_zimo_{false};
+  int gang_score_seq_{0};
+  std::array<int64_t, 4> last_gang_deltas_{};
   std::array<ActionKind, 4> claims_{};
   std::array<ChiOption, 4> claim_chi_{};
   bool claims_ready_[4]{};
   SettlePlan last_settle_{};
+  TileId last_hu_tile_{kTileInvalid};
+  bool last_hu_zimo_{false};
+  int last_shooter_seat_{-1};
+  int last_hu_M_{1};
+  int last_hu_N_{2};
   Rng rng_;
   Sink sink_;
   int64_t round_id_{1};

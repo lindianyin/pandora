@@ -110,6 +110,13 @@ function seatMelds(seatId: number): HzmjMeld[] {
 
     <div class="row">
       <template v-if="c.isHzmjDiscardTurn.value">
+        <button
+          v-if="c.canZimoHu.value"
+          class="warn"
+          @click="c.doAction(4)"
+        >
+          自摸
+        </button>
         <button :disabled="c.selectedHandIndex.value == null" @click="c.doDiscard()">出牌</button>
         <button
           v-for="g in c.anGangCandidates.value"
@@ -118,6 +125,14 @@ function seatMelds(seatId: number): HzmjMeld[] {
           @click="c.doAnGang(g)"
         >
           暗杠 {{ c.tileLabel(g) }}
+        </button>
+        <button
+          v-for="g in c.buGangCandidates.value"
+          :key="'bg' + g"
+          class="warn"
+          @click="c.doBuGang(g)"
+        >
+          补杠 {{ c.tileLabel(g) }}
         </button>
       </template>
       <template v-if="c.isHzmjClaim.value">
@@ -132,7 +147,12 @@ function seatMelds(seatId: number): HzmjMeld[] {
 
     <div v-if="c.showSettle.value && c.hzmjSettle.value" class="settle">
       <strong>结算</strong>
+      {{ c.hzmjSettle.value.is_zimo ? '自摸' : '点炮' }}
+      <span v-if="!c.hzmjSettle.value.is_zimo && c.hzmjSettle.value.shooter_seat >= 0">
+        (seat{{ c.hzmjSettle.value.shooter_seat }})
+      </span>
       M={{ c.hzmjSettle.value.M }} N={{ c.hzmjSettle.value.N }}
+      <span v-if="c.hzmjSettle.value.hu_tile >= 0">胡 {{ c.tileLabel(c.hzmjSettle.value.hu_tile) }}</span>
       <span v-for="e in c.hzmjSettle.value.entries" :key="e.uid">
         座{{ e.seat_id }} {{ e.delta_gold >= 0 ? '+' : '' }}{{ e.delta_gold }}
         <em v-if="e.uid === c.uid.value">(我)</em>

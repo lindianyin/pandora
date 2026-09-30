@@ -5,8 +5,10 @@ import { cardLabel, tileLabel, type LobbyTemplate, type RoomSeat, type HzmjSettl
 import { canChiClaim, canMingGangClaim, canPengClaim, listChiOptions } from '../net/hzmjMeld'
 import {
   applySelfDiscard,
+  canHuHand,
   canShowDianpaoHu,
   listAnGangTiles,
+  listBuGangTiles,
   removeOneTile,
   sortHand,
 } from '../net/hzmjHand'
@@ -70,6 +72,7 @@ const hzmjBanker = ref(0)
 const hzmjLian = ref(1)
 const hzmjN = ref(2)
 const hzmjWall = ref(0)
+const hzmjRoundId = ref(0)
 const hzmjSub = ref('')
 const hzmjPiaoSeat = ref(-1)
 const hzmjLastDiscard = ref<{ seat: number; tile: number } | null>(null)
@@ -317,6 +320,8 @@ function createSocket(): GameSocket {
     },
     onHzmjGameStart: (g) => {
       currentGameId.value = 2
+      const sameRound = hzmjRoundId.value !== 0 && g.round_id === hzmjRoundId.value
+      hzmjRoundId.value = g.round_id
       roomId.value = g.room_id || roomId.value
       roomTemplateId.value = g.template_id
       mySeat.value = g.self_seat
@@ -329,8 +334,10 @@ function createSocket(): GameSocket {
       hzmjWall.value = g.wall_remain
       hzmjBaseScore.value = g.base_score
       hzmjMelds.value = {}
-      hzmjRivers.value = {}
-      hzmjLastDiscard.value = null
+      if (!sameRound) {
+        hzmjRivers.value = {}
+        hzmjLastDiscard.value = null
+      }
       lastPlays.value = {}
       showHzmjSettle.value = false
       showLiuJu.value = false
@@ -565,6 +572,9 @@ const isHzmjDiscardTurn = computed(
 )
 
 const anGangCandidates = computed(() => listAnGangTiles(hand.value))
+const buGangCandidates = computed(() =>
+  listBuGangTiles(hand.value, hzmjMelds.value[mySeat.value] || []),
+)
 
 const claimTile = computed(() => hzmjLastDiscard.value?.tile ?? -1)
 const claimFromSeat = computed(() => hzmjLastDiscard.value?.seat ?? -1)
@@ -585,6 +595,9 @@ const canClaimHu = computed(() =>
     hand.value,
     (hzmjMelds.value[mySeat.value] || []).length,
   ),
+)
+const canZimoHu = computed(
+  () => isHzmjDiscardTurn.value && canHuHand(hand.value, (hzmjMelds.value[mySeat.value] || []).length),
 )
 
 async function checkHealth() {
@@ -718,6 +731,11 @@ function doHzmjAction(action: number) {
     clearErrorSoon()
     return
   }
+  if (action === 4 && canZimoHu.value) {
+    pushLog('自摸')
+    sock.hzmjAction(4)
+    return
+  }
   if (hzmjClaimSent.value) return
   if (action === 1 && !canClaimChi.value) {
     hzmjClaimHint.value = '当前不能吃（仅上家且成顺）'
@@ -745,6 +763,11 @@ function doHzmjAction(action: number) {
 function doHzmjAnGang(tile: number) {
   if (!sock || !wsOk.value) return
   sock.hzmjGang(0, tile)
+}
+
+function doHzmjBuGang(tile: number) {
+  if (!sock || !wsOk.value) return
+  sock.hzmjGang(1, tile)
 }
 
 function backLobby() {
@@ -847,10 +870,12 @@ export function useGameSession() {
     isHzmjClaim,
     isHzmjDiscardTurn,
     anGangCandidates,
+    buGangCandidates,
     canClaimChi,
     canClaimPeng,
     canClaimGang,
     canClaimHu,
+    canZimoHu,
     hzmjClaimSent,
     hzmjClaimHint,
     checkHealth,
@@ -867,6 +892,7 @@ export function useGameSession() {
     doHzmjDiscard,
     doHzmjAction,
     doHzmjAnGang,
+    doHzmjBuGang,
     backLobby,
     closeSettleStay,
     disconnect,

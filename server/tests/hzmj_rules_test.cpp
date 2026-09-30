@@ -90,7 +90,7 @@ void TestHu() {
   {
     auto h = H({0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, kBai});
     auto r = CheckHu(h, {}, kBai, true);
-    Expect(r.ok && r.kind == HuKind::kQiDui && !r.qing_qi_dui, "qi dui with caishen");
+    Expect(r.ok && r.kind == HuKind::kQiDui && !r.qing_qi_dui && r.baotou, "qi dui with caishen is qi ke");
   }
   // haohua: one quad + 5 pairs = 14? 4+10=14 -> 2+5=7 pair slots
   {
@@ -112,6 +112,52 @@ void TestHu() {
   {
     auto h13 = H({27, 0, 1, 2, 3, 4, 5, 6, 7, 8, 32, 32, 32});
     Expect(WouldHu(h13, {}, 27, true), "would hu draw dong");
+  }
+  // baotou ting: 123万456万789万中中中白
+  {
+    auto h13 = H({0, 1, 2, 3, 4, 5, 6, 7, 8, 31, 31, 31, kBai});
+    auto ting = ComputeTing(h13, {});
+    Expect(ting.baotou_ting, "baotou ting any-draw");
+    Expect(static_cast<int>(ting.waits.size()) >= 30, "baotou waits many");
+  }
+  // hu with exposed peng meld
+  {
+    std::vector<Meld> melds;
+    melds.push_back(Meld{MeldType::kPeng, 31, {}, 1});
+    auto h = H({27, 27, 0, 1, 2, 3, 4, 5, 6, 7, 8});
+    Expect(CheckHu(h, melds, 27, true).ok, "hu with peng meld");
+  }
+  // shuang hao hua qing qi dui M path via haohua=2
+  {
+    auto h = H({0, 0, 0, 0, 2, 2, 2, 2, 4, 4, 6, 6, 8, 8});
+    auto r = CheckHu(h, {}, 8, true);
+    Expect(r.ok && r.kind == HuKind::kQiDui && r.haohua == 2, "shuang hao hua");
+  }
+  // chi multi options for discard mid
+  {
+    auto opts = ListChiOptions(H({0, 2, 3}), 1);
+    Expect(opts.size() >= 2, "chi multi options");
+  }
+  // 4 exposed melds + pair (caishen as half of the pair) is hu; 3 melds + that pair is short
+  {
+    std::vector<Meld> melds = {
+        Meld{MeldType::kPeng, 9, {}, 0},
+        Meld{MeldType::kPeng, 18, {}, 1},
+        Meld{MeldType::kPeng, 27, {}, 2},
+        Meld{MeldType::kChi, 0, {}, 3},
+    };
+    auto pair = H({2, kBai});
+    Expect(CheckHu(pair, melds, kBai, true).ok, "4 melds + caishen pair");
+    Expect(CheckHu(H({2, 2}), melds, 2, true).ok, "4 melds + real pair");
+    melds.pop_back();
+    Expect(!CheckHu(pair, melds, kBai, true).ok, "3 melds + pair is short");
+  }
+  // qi ke M comes from CheckHu, not a hand-built HuResult (must stay x4, not baotou x2 * qi dui x2)
+  {
+    auto h = H({0, 0, 2, 2, 4, 4, 6, 6, 8, 8, 10, 10, 12, kBai});
+    auto r = CheckHu(h, {}, kBai, true);
+    Expect(r.ok && r.kind == HuKind::kQiDui && r.baotou, "checkhu qi ke flags");
+    Expect(ComputeM(r, 0, 0) == 4, "qi ke M from CheckHu is 4");
   }
 }
 
@@ -137,14 +183,36 @@ void TestScore() {
   ping.baotou = true;
   Expect(ComputeM(ping, 0, 1) == 4, "M gang bao");
   Expect(ComputeM(ping, 1, 1) == 8, "T06 M gang piao=8");
+  Expect(ComputeM(ping, 1, 1) == 8, "M piao gang=8");  // same product
+  ping.baotou = false;
+  Expect(ComputeM(ping, 0, 3) == 8, "M san lian gang");
+  Expect(ComputeM(ping, 0, 4) == 16, "M si lian gang");
 
   HuResult qd;
   qd.ok = true;
   qd.kind = HuKind::kQiDui;
+  qd.qing_qi_dui = false;
+  Expect(ComputeM(qd, 0, 0) == 2, "M qi dui with caishen");
+  qd.haohua = 1;
+  Expect(ComputeM(qd, 0, 0) == 4, "M hao hua qi dui");
+  qd.haohua = 2;
+  Expect(ComputeM(qd, 0, 0) == 8, "M shuang hao hua qi dui");
+  qd.haohua = 3;
+  Expect(ComputeM(qd, 0, 0) == 16, "M san hao hua qi dui");
+  qd.haohua = 0;
   qd.qing_qi_dui = true;
   Expect(ComputeM(qd, 0, 0) == 4, "M qing qi dui");
   qd.haohua = 1;
   Expect(ComputeM(qd, 0, 0) == 8, "M hao hua qing");
+  qd.haohua = 2;
+  Expect(ComputeM(qd, 0, 0) == 16, "M shuang hao hua qing");
+  qd.haohua = 3;
+  Expect(ComputeM(qd, 0, 0) == 32, "M san hao hua qing");
+  // qi ke: qi dui + baotou
+  qd.haohua = 0;
+  qd.qing_qi_dui = false;
+  qd.baotou = true;
+  Expect(ComputeM(qd, 0, 0) == 4, "M qi ke");
 }
 
 void TestSettle() {
@@ -185,6 +253,9 @@ void TestSettle() {
   Expect(!CanDianpao(cfg, 2, 1, 0, 0), "T08 no dianpao ping zhuang");
   Expect(CanDianpao(cfg, 8, 1, 0, 0), "T07 dianpao sanlao banker-xian");
   Expect(!CanDianpao(cfg, 8, 1, 2, 0), "no xian-xian dianpao");
+  cfg.xian_xian_dianpao = true;
+  Expect(CanDianpao(cfg, 8, 1, 2, 0), "xian-xian dianpao when enabled");
+  cfg.xian_xian_dianpao = false;
 
   // T07 dianpao: shooter pays total zimo amount
   in.winner_seat = 0;
@@ -212,6 +283,34 @@ void TestSettle() {
   Expect(p.contractor_seat == 2, "T09 contractor 2");
   Expect(p.deltas[2] < 0 && p.deltas[0] == 0 && p.deltas[3] == 0, "T09 only contractor pays");
   Expect(p.deltas[1] == -p.deltas[2], "T09 winner gets contractor pay");
+
+  // winner ate someone 3 times -> that someone contracts
+  in.tan_count = {};
+  in.tan_count[1][3] = 3;
+  p = BuildSettle(in);
+  Expect(p.contractor_seat == 3, "T09 reverse contractor");
+
+  // both directions full: prefer the seat who ate the winner
+  in.tan_count = {};
+  in.tan_count[2][1] = 3;  // seat2 ate winner
+  in.tan_count[1][3] = 3;  // winner ate seat3
+  p = BuildSettle(in);
+  Expect(p.contractor_seat == 2, "conflict prefers eater of winner");
+
+  // er lian N=4 xian zimo M=1 base=100: stake=100, banker pays 400, xian 100 each
+  in.winner_seat = 1;
+  in.banker_seat = 0;
+  in.is_zimo = true;
+  in.shooter_seat = -1;
+  in.N = 4;
+  in.M = 1;
+  in.base_score = 100;
+  in.tan_count = {};
+  p = BuildSettle(in);
+  Expect(p.stake == 100, "er lian stake");
+  Expect(p.deltas[1] == 600, "er lian winner +600");
+  Expect(p.deltas[0] == -400, "er lian banker -400");
+  Expect(p.deltas[2] == -100 && p.deltas[3] == -100, "er lian xian -100");
 
   Expect(IdemSettleKey(9, 7) == "hzmj:settle:9:7", "idem key");
 }
