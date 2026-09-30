@@ -596,12 +596,15 @@ async function checkHealth() {
   }
 }
 
-async function loginAndConnect() {
+async function loginAndConnect(forcedDeviceId?: string) {
   busy.value = true
   errorBanner.value = ''
   try {
+    const fromArg = (forcedDeviceId || '').trim().slice(0, 128)
     const deviceId =
-      sessionStorage.getItem('pandora_device') || `web-${Math.random().toString(16).slice(2)}`
+      fromArg ||
+      sessionStorage.getItem('pandora_device') ||
+      `web-${Math.random().toString(16).slice(2, 10)}`
     sessionStorage.setItem('pandora_device', deviceId)
     const r = await loginGuest(deviceId)
     if (r.code !== 0) {
@@ -615,7 +618,7 @@ async function loginAndConnect() {
     gold.value = r.data.gold
     diamond.value = r.data.diamond
     sessionStorage.setItem('pandora_token', token.value)
-    pushLog(`login ok uid=${uid.value}`)
+    pushLog(`login ok uid=${uid.value} device=${deviceId}`)
 
     if (reconnectTimer != null) {
       clearTimeout(reconnectTimer)
