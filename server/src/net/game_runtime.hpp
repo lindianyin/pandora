@@ -94,6 +94,19 @@ struct GameRuntime {
         rooms.OnHzmjGang(uid, kind, tile);
         break;
       }
+      case MsgId::kC2S_PhzDiscard: {
+        int32_t tile = 0;
+        proto_wire::DecodeC2S_PhzDiscard(body, len, tile);
+        rooms.OnPhzDiscard(uid, tile);
+        break;
+      }
+      case MsgId::kC2S_PhzAction: {
+        int32_t action = 0;
+        std::vector<int32_t> chi;
+        proto_wire::DecodeC2S_PhzAction(body, len, action, chi);
+        rooms.OnPhzAction(uid, action, chi);
+        break;
+      }
       case MsgId::kC2S_ClientTrace: {
         int64_t round_id = 0;
         int32_t seat = -1;
@@ -101,7 +114,7 @@ struct GameRuntime {
         std::string detail;
         std::string game;
         if (!proto_wire::DecodeC2S_ClientTrace(body, len, round_id, seat, event, detail, game)) break;
-        if (game != "hzmj" && game != "ddz") game = "game";
+        if (game != "hzmj" && game != "ddz" && game != "phz") game = "game";
         const auto room = rooms.RoomOf(uid);
         LogRound(round_id, "client", game.c_str(), room ? *room : 0, uid, seat, event, detail);
         break;

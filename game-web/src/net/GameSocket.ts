@@ -14,6 +14,8 @@ import {
   encodeC2S_HzmjDiscard,
   encodeC2S_HzmjAction,
   encodeC2S_HzmjGang,
+  encodeC2S_PhzDiscard,
+  encodeC2S_PhzAction,
   encodeC2S_ClientTrace,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
@@ -32,12 +34,22 @@ import {
   decodeS2C_HzmjActionBroadcast,
   decodeS2C_HzmjSettle,
   decodeS2C_HzmjLiuJu,
+  decodeS2C_PhzGameStart,
+  decodeS2C_PhzTurn,
+  decodeS2C_PhzDraw,
+  decodeS2C_PhzReveal,
+  decodeS2C_PhzDiscardBroadcast,
+  decodeS2C_PhzActionBroadcast,
+  decodeS2C_PhzSettle,
+  decodeS2C_PhzLiuJu,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
   type LobbyTemplate,
   type RoomSeat,
   type HzmjGameStart,
   type HzmjSettle,
+  type PhzGameStart,
+  type PhzSettle,
 } from './frame'
 
 export type GameHandlers = {
@@ -102,6 +114,28 @@ export type GameHandlers = {
   }) => void
   onHzmjSettle?: (s: HzmjSettle) => void
   onHzmjLiuJu?: (s: { lian_zhuang: number }) => void
+  onPhzGameStart?: (s: PhzGameStart) => void
+  onPhzTurn?: (s: {
+    seat_id: number
+    sub: string
+    timeout_s: number
+    wall_remain: number
+    self_hand: number[]
+    can_hu: boolean
+  }) => void
+  onPhzDraw?: (s: { seat_id: number; tile: number }) => void
+  onPhzReveal?: (s: { seat_id: number; tile: number }) => void
+  onPhzDiscard?: (s: { seat_id: number; tile: number }) => void
+  onPhzAction?: (s: {
+    seat_id: number
+    action: number
+    tile: number
+    tiles: number[]
+    from_seat: number
+    meld_kind: number
+  }) => void
+  onPhzSettle?: (s: PhzSettle) => void
+  onPhzLiuJu?: (s: { banker_seat: number }) => void
 }
 
 export class GameSocket {
@@ -173,6 +207,12 @@ export class GameSocket {
   }
   hzmjGang(kind: number, tile: number) {
     this.send(MsgId.C2S_HzmjGang, encodeC2S_HzmjGang(kind, tile))
+  }
+  phzDiscard(tile: number) {
+    this.send(MsgId.C2S_PhzDiscard, encodeC2S_PhzDiscard(tile))
+  }
+  phzAction(action: number, chiHand: number[] = []) {
+    this.send(MsgId.C2S_PhzAction, encodeC2S_PhzAction(action, chiHand))
   }
   trace(roundId: number, seatId: number, game: string, event: string, detail: string) {
     if (roundId <= 0) return
@@ -278,6 +318,44 @@ export class GameSocket {
       const r = decodeS2C_HzmjLiuJu(body)
       this.log(`HzmjLiuJu lian=${r.lian_zhuang}`)
       this.handlers.onHzmjLiuJu?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_PhzGameStart) {
+      const r = decodeS2C_PhzGameStart(body)
+      this.log(`PhzStart seat=${r.self_seat} hand=${r.self_hand.length} wall=${r.wall_remain}`)
+      this.handlers.onPhzGameStart?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_PhzTurn) {
+      this.handlers.onPhzTurn?.(decodeS2C_PhzTurn(body))
+      return
+    }
+    if (msgId === MsgId.S2C_PhzDraw) {
+      this.handlers.onPhzDraw?.(decodeS2C_PhzDraw(body))
+      return
+    }
+    if (msgId === MsgId.S2C_PhzReveal) {
+      this.handlers.onPhzReveal?.(decodeS2C_PhzReveal(body))
+      return
+    }
+    if (msgId === MsgId.S2C_PhzDiscardBroadcast) {
+      this.handlers.onPhzDiscard?.(decodeS2C_PhzDiscardBroadcast(body))
+      return
+    }
+    if (msgId === MsgId.S2C_PhzActionBroadcast) {
+      this.handlers.onPhzAction?.(decodeS2C_PhzActionBroadcast(body))
+      return
+    }
+    if (msgId === MsgId.S2C_PhzSettle) {
+      const r = decodeS2C_PhzSettle(body)
+      this.log(`PhzSettle xi=${r.hu_xi} tun=${r.tun} fan=${r.fan} winner=${r.winner_seat}`)
+      this.handlers.onPhzSettle?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_PhzLiuJu) {
+      const r = decodeS2C_PhzLiuJu(body)
+      this.log(`PhzLiuJu banker=${r.banker_seat}`)
+      this.handlers.onPhzLiuJu?.(r)
       return
     }
     if (msgId === MsgId.S2C_ActivityUpdate) {

@@ -5,6 +5,7 @@
 #include <common.pb.h>
 #include <game_ddz.pb.h>
 #include <game_hzmj.pb.h>
+#include <game_phz.pb.h>
 #include <lobby.pb.h>
 #include <social.pb.h>
 
@@ -374,6 +375,112 @@ std::vector<uint8_t> EncodeS2C_HzmjSettle(int64_t round_id, int32_t winner_seat,
 std::vector<uint8_t> EncodeS2C_HzmjLiuJu(int32_t lian_zhuang) {
   S2C_HzmjLiuJu m;
   m.set_lian_zhuang(lian_zhuang);
+  return Serialize(m);
+}
+
+bool DecodeC2S_PhzDiscard(const uint8_t* data, size_t len, int32_t& tile) {
+  C2S_PhzDiscard m;
+  if (!Parse(data, len, m)) return false;
+  tile = m.tile();
+  return true;
+}
+
+bool DecodeC2S_PhzAction(const uint8_t* data, size_t len, int32_t& action, std::vector<int32_t>& chi_hand) {
+  C2S_PhzAction m;
+  if (!Parse(data, len, m)) return false;
+  action = m.action();
+  chi_hand.clear();
+  for (auto t : m.chi_hand_tiles()) chi_hand.push_back(t);
+  return true;
+}
+
+std::vector<uint8_t> EncodeS2C_PhzGameStart(int64_t round_id, int64_t room_id, int32_t template_id, int32_t banker_seat,
+                                            const std::vector<int32_t>& self_hand, int32_t wall_remain, int32_t self_seat,
+                                            int32_t base_score, const std::string& cfg_snapshot) {
+  S2C_PhzGameStart m;
+  m.set_round_id(round_id);
+  m.set_room_id(room_id);
+  m.set_template_id(template_id);
+  m.set_banker_seat(banker_seat);
+  for (auto t : self_hand) m.add_self_hand(t);
+  m.set_wall_remain(wall_remain);
+  m.set_self_seat(self_seat);
+  m.set_base_score(base_score);
+  m.set_cfg_snapshot(cfg_snapshot);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzTurn(int32_t seat_id, const std::string& sub, int32_t timeout_s, int32_t wall_remain,
+                                       const std::vector<int32_t>& self_hand, bool can_hu) {
+  S2C_PhzTurn m;
+  m.set_seat_id(seat_id);
+  m.set_sub(sub);
+  m.set_timeout_s(timeout_s);
+  m.set_wall_remain(wall_remain);
+  for (auto t : self_hand) m.add_self_hand(t);
+  m.set_can_hu(can_hu);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzDraw(int32_t seat_id, int32_t tile) {
+  S2C_PhzDraw m;
+  m.set_seat_id(seat_id);
+  m.set_tile(tile);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzReveal(int32_t seat_id, int32_t tile) {
+  S2C_PhzReveal m;
+  m.set_seat_id(seat_id);
+  m.set_tile(tile);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzDiscardBroadcast(int32_t seat_id, int32_t tile) {
+  S2C_PhzDiscardBroadcast m;
+  m.set_seat_id(seat_id);
+  m.set_tile(tile);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzActionBroadcast(int32_t seat_id, int32_t action, int32_t tile,
+                                                  const std::vector<int32_t>& tiles, int32_t from_seat,
+                                                  int32_t meld_kind) {
+  S2C_PhzActionBroadcast m;
+  m.set_seat_id(seat_id);
+  m.set_action(action);
+  m.set_tile(tile);
+  for (auto t : tiles) m.add_tiles(t);
+  if (from_seat >= 0) m.set_from_seat(from_seat);
+  if (meld_kind != 0) m.set_meld_kind(meld_kind);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzSettle(int64_t round_id, int32_t winner_seat, int32_t hu_tile, bool is_draw_win,
+                                         int32_t hu_xi, int32_t tun, int32_t fan, int32_t ming_tang_mask,
+                                         int32_t base_score, const std::vector<SettleEntry>& entries) {
+  S2C_PhzSettle m;
+  m.set_round_id(round_id);
+  m.set_winner_seat(winner_seat);
+  m.set_hu_tile(hu_tile);
+  m.set_is_draw_win(is_draw_win);
+  m.set_hu_xi(hu_xi);
+  m.set_tun(tun);
+  m.set_fan(fan);
+  m.set_ming_tang_mask(ming_tang_mask);
+  m.set_base_score(base_score);
+  for (const auto& e : entries) {
+    auto* ne = m.add_entries();
+    ne->set_uid(e.uid);
+    ne->set_seat_id(e.seat_id);
+    ne->set_delta_gold(e.delta_gold);
+  }
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_PhzLiuJu(int32_t banker_seat) {
+  S2C_PhzLiuJu m;
+  m.set_banker_seat(banker_seat);
   return Serialize(m);
 }
 

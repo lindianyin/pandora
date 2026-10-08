@@ -25,6 +25,7 @@
 #include "common/config.hpp"
 #include "game/ddz_cards.hpp"
 #include "game/hzmj/table.hpp"
+#include "game/phz/table.hpp"
 #include "net/session_hub.hpp"
 #include "store/memory_store.hpp"
 #include "wallet/wallet_service.hpp"
@@ -171,6 +172,9 @@ class RoomManager {
   void OnHzmjAction(int64_t uid, int32_t action, const std::vector<int32_t>& chi_hand);
   void OnHzmjGang(int64_t uid, int32_t kind, int32_t tile);
 
+  void OnPhzDiscard(int64_t uid, int32_t tile);
+  void OnPhzAction(int64_t uid, int32_t action, const std::vector<int32_t>& chi_hand);
+
   void Tick();
 
   std::optional<int64_t> RoomOf(int64_t uid);
@@ -235,6 +239,16 @@ class RoomManager {
 
     bool hzmj_done{false};
 
+    std::unique_ptr<phz::PhzTable> phz;
+
+    int phz_banker{0};
+
+    int64_t phz_round_id{0};
+
+    std::chrono::steady_clock::time_point phz_deadline{};
+
+    bool phz_done{false};
+
   };
 
   void ClearTrusteeshipInRoom(Room& r, int64_t uid);
@@ -256,6 +270,12 @@ class RoomManager {
   void FinishHzmjRound(Room& room);
   void ArmHzmjDeadline(Room& room);
   void TickHzmj(Room& room, std::chrono::steady_clock::time_point now);
+  void StartPhz(Room& room);
+  void OnPhzEvent(Room& room, const phz::OutEvent& ev);
+  void ApplyPhzSettle(Room& room);
+  void FinishPhzRound(Room& room);
+  void ArmPhzDeadline(Room& room);
+  void TickPhz(Room& room, std::chrono::steady_clock::time_point now);
   int SeatOfUid(const Room& room, int64_t uid) const;
   bool GameInProgress(const Room& room) const;
   static std::size_t ShardOf(int64_t room_id) {

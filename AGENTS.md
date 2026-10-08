@@ -2,7 +2,7 @@
 
 棋牌游戏单体服务端（C++）+ Vue 网页客户端 + 运营后台。平台里程碑：**M6**（IOCP、报表、压测）。玩法：斗地主经典简单规则，以及杭州麻将（白板固定财神）。
 
-需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。杭州麻将以 `docs/杭州麻将-SPEC.md` 为准，规则说明见 `docs/杭州麻将规则.md`。
+需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。杭州麻将以 `docs/杭州麻将-SPEC.md` 为准，规则说明见 `docs/杭州麻将规则.md`。跑胡子以 `docs/跑胡子-SPEC.md` 为准，规则说明见 `docs/跑胡子规则.md`。
 
 ## 硬约束（不可偏离）
 
@@ -16,19 +16,20 @@
 ## 仓库地图
 
 ```text
-docs/                 # SRS / SPEC / 杭州麻将 / M1–M6 计划
+docs/                 # SRS / SPEC / 杭州麻将 / 跑胡子 / M1–M6 计划
 proto/                # 唯一协议契约（.proto）
 server/               # C++ pandora-server（MSVC / CMake）
   src/net/            # HTTP、WSS、帧、SessionHub、IOCP
   src/auth/ lobby/ match/ room/ game/
   src/game/hzmj/      # 杭州麻将牌桌、胡牌、计分
+  src/game/phz/       # 跑胡子牌桌、偎跑提、囤番
   src/wallet/ pay/ activity/ admin/ social/ bag/
   src/store/          # MysqlClient、RedisClient、MemoryStore
   conf/               # server.json / server.tls.json
   sql/                # schema.sql
   scripts/            # build.ps1、*_smoke.mjs、ccu_load.mjs
-  tests/              # hzmj_table_test、hzmj_rules_test、ddz_cards_test
-game-web/             # Vue3 游戏客户端（联调/演示，端口 5173；/hzmj-lab 四联、/ddz-lab 三联）
+  tests/              # hzmj_*_test、phz_*_test、ddz_cards_test
+game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab
 admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
 docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```
@@ -36,7 +37,7 @@ docker-compose.yml    # MySQL 5.7 + Redis 6.2
 命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`。对局轨迹用 `LogRound`（`server/src/common/log.hpp`），行格式：
 
 ```text
-round=<局号> src=server|client game=hzmj|ddz room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
+round=<局号> src=server|client game=hzmj|ddz|phz room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
 ```
 
 文件在进程工作目录 `logs/pandora_YYYY-MM-DD.log`（从 `server/` 启动即为 `server/logs/`）。客户端经 `C2S_ClientTrace`（9001）上报，服务端用 `RoomOf(uid)` 填房间号。座位类事件的 `uid` 取该座位玩家。
@@ -68,6 +69,7 @@ node server\scripts\m3_smoke.mjs
 node server\scripts\admin_smoke.mjs
 node server\scripts\activity_smoke.mjs
 node server\scripts\hzmj_smoke.mjs
+node server\scripts\phz_smoke.mjs
 node server\scripts\ccu_load.mjs --target 200
 ```
 
@@ -76,7 +78,10 @@ node server\scripts\ccu_load.mjs --target 200
 ```powershell
 cmake --build server\build --config Release --target hzmj_table_test
 cmake --build server\build --config Release --target hzmj_rules_test
+cmake --build server\build --config Release --target phz_table_test
+cmake --build server\build --config Release --target phz_rules_test
 server\build\Release\hzmj_table_test.exe
+server\build\Release\phz_table_test.exe
 cd game-web
 npm test
 ```
@@ -122,7 +127,7 @@ Admin 默认超管：`admin` / `admin123`。
 ## 编码约定
 
 - **最小改动**：只改任务相关代码；不顺手大重构、不扩写无关文档。
-- **协议变更**：先改 `proto/`，再同步 `server` 与 `game-web`；勿手写与 `.proto` 不一致的字段。
+- **协议变更**：先改 `proto/`，再同步 `server` 与 `game-web`；勿手写与 `.proto` 不一致的字段。`game-web` 用 ts-proto 生成：`cd game-web; npm run proto:gen`（输出 `src/gen/`），`frame.ts` 仅保留帧封装与薄包装。
 - **金钱与幂等**：余额变更必须走 `WalletService` + `ledger.idempotent_key`；禁止绕过账变直接改余额。
 - **Redis**：当缓存用；断连或不可用时业务应可降级到 MySQL/内存（现有路径已按此设计）。
 - **网络**：新连接逻辑挂在现有 IOCP/Beast 路径上；不要引入「一连接一线程」。
@@ -157,7 +162,9 @@ Admin 默认超管：`admin` / `admin123`。
 | `docs/棋牌游戏服务端-SPEC.md` | 技术规格、表结构、协议、模块接口、对局日志 |
 | `docs/杭州麻将-SPEC.md` | 杭州麻将协议、托管、重连、计分 |
 | `docs/杭州麻将规则.md` | 玩法说明（白板财神、爆头、三牢点炮） |
+| `docs/跑胡子-SPEC.md` | 跑胡子协议、状态机、偎跑提、囤番结算 |
+| `docs/跑胡子规则.md` | 跑胡子玩法说明（湖南经典默认档） |
 | `docs/棋牌游戏服务端-M1计划.md` … `M6计划.md` | 里程碑范围与验收 |
 | `README.md` | 本地启动与冒烟入口 |
 
-改行为或契约时：先改对应 SPEC（玩法规则同时改 `docs/杭州麻将规则.md`），再改 `proto/`、服务端、`game-web` 与冒烟脚本。
+改行为或契约时：先改对应 SPEC（玩法规则同时改 `docs/杭州麻将规则.md` / `docs/跑胡子规则.md`），再改 `proto/`、服务端、`game-web` 与冒烟脚本。

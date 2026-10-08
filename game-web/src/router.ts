@@ -38,6 +38,17 @@ const router = createRouter({
       component: () => import('./views/DdzLabView.vue'),
     },
     {
+      path: '/phz-lab',
+      name: 'phz-lab',
+      component: () => import('./views/PhzLabView.vue'),
+    },
+    {
+      path: '/phz-table',
+      name: 'phz-table',
+      component: () => import('./views/PhzTableView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),

@@ -100,5 +100,24 @@ std::vector<uint8_t> EncodeS2C_HzmjSettle(int64_t round_id, int32_t winner_seat,
                                           int32_t base_score, const std::vector<SettleEntry>& entries);
 std::vector<uint8_t> EncodeS2C_HzmjLiuJu(int32_t lian_zhuang);
 
+bool DecodeC2S_PhzDiscard(const uint8_t* data, size_t len, int32_t& tile);
+bool DecodeC2S_PhzAction(const uint8_t* data, size_t len, int32_t& action, std::vector<int32_t>& chi_hand);
+
+std::vector<uint8_t> EncodeS2C_PhzGameStart(int64_t round_id, int64_t room_id, int32_t template_id, int32_t banker_seat,
+                                            const std::vector<int32_t>& self_hand, int32_t wall_remain, int32_t self_seat,
+                                            int32_t base_score, const std::string& cfg_snapshot);
+std::vector<uint8_t> EncodeS2C_PhzTurn(int32_t seat_id, const std::string& sub, int32_t timeout_s, int32_t wall_remain,
+                                       const std::vector<int32_t>& self_hand, bool can_hu);
+std::vector<uint8_t> EncodeS2C_PhzDraw(int32_t seat_id, int32_t tile);
+std::vector<uint8_t> EncodeS2C_PhzReveal(int32_t seat_id, int32_t tile);
+std::vector<uint8_t> EncodeS2C_PhzDiscardBroadcast(int32_t seat_id, int32_t tile);
+std::vector<uint8_t> EncodeS2C_PhzActionBroadcast(int32_t seat_id, int32_t action, int32_t tile,
+                                                  const std::vector<int32_t>& tiles = {}, int32_t from_seat = -1,
+                                                  int32_t meld_kind = 0);
+std::vector<uint8_t> EncodeS2C_PhzSettle(int64_t round_id, int32_t winner_seat, int32_t hu_tile, bool is_draw_win,
+                                         int32_t hu_xi, int32_t tun, int32_t fan, int32_t ming_tang_mask,
+                                         int32_t base_score, const std::vector<SettleEntry>& entries);
+std::vector<uint8_t> EncodeS2C_PhzLiuJu(int32_t banker_seat);
+
 }  // namespace proto_wire
 }  // namespace pandora

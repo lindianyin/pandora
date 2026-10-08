@@ -116,6 +116,7 @@ int RoomManager::SeatOfUid(const Room& room, int64_t uid) const {
 bool RoomManager::GameInProgress(const Room& room) const {
   if (room.game && !room.game->Finished()) return true;
   if (room.hzmj && !room.hzmj_done) return true;
+  if (room.phz && !room.phz_done) return true;
   return false;
 }
 
@@ -150,6 +151,10 @@ void RoomManager::MaybeStart(Room& room) {
 
   if (room.game_id == 2) {
     StartHzmj(room);
+    return;
+  }
+  if (room.game_id == 3) {
+    StartPhz(room);
     return;
   }
 
@@ -471,6 +476,302 @@ void RoomManager::FinishHzmjRound(Room& room) {
   PushRoomState(room.room_id);
 }
 
+namespace {
+
+std::vector<int32_t> PhzHandToList(const phz::HandCount& h) {
+  std::vector<int32_t> out;
+  for (int t = 0; t < phz::kTileKinds; ++t) {
+    for (int n = 0; n < h[static_cast<size_t>(t)]; ++n) out.push_back(t);
+  }
+  return out;
+}
+
+int PhzActionCode(const std::string& type) {
+  if (type == "Chi") return 1;
+  if (type == "Peng") return 2;
+  if (type == "Wei" || type == "ChouWei") return 3;
+  if (type == "Pao") return 5;
+  if (type == "Ti") return 6;
+  return 0;
+}
+
+}  // namespace
+
+void RoomManager::StartPhz(Room& room) {
+  std::array<int64_t, phz::kSeats> uids{};
+  for (int i = 0; i < room.seat_count && i < phz::kSeats; ++i)
+    uids[static_cast<size_t>(i)] = room.seats[static_cast<size_t>(i)].uid;
+  phz::PhzConfig pcfg;
+  pcfg.base_score = cfg_.base_score;
+  pcfg.action_timeout_s = cfg_.play_timeout_s;
+  pcfg.rake_bp = cfg_.rake_bp;
+  if (cfg_.phz_debug_deal) room.phz_banker = 0;
+  room.phz = std::make_unique<phz::PhzTable>(pcfg, uids, room.phz_banker);
+  room.phz_round_id = NowMs();
+  room.phz_done = false;
+  room.phase = "Deal";
+  const int64_t rid = room.room_id;
+  room.phz->SetSink([this, rid](const phz::OutEvent& ev) {
+    Room* r = FindRoomUnlocked(rid);
+    if (!r || !r->phz) return;
+    OnPhzEvent(*r, ev);
+  });
+  if (cfg_.phz_debug_deal) {
+    room.phz->ApplyDebugQuickHuDeal();
+    room.phz_banker = room.phz->banker_seat();
+    PLOG_INFO("phz debug deal: seat1 ting Yi, banker discards Shi, seat1 zimo Yi");
+  }
+  PushRoomState(room.room_id);
+  room.phz->Start();
+  if (room.phz->phase() == phz::Phase::kPlay) room.phase = "Play";
+  ArmPhzDeadline(room);
+}
+
+void RoomManager::ArmPhzDeadline(Room& room) {
+  room.phz_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(cfg_.play_timeout_s);
+}
+
+void RoomManager::OnPhzEvent(Room& room, const phz::OutEvent& ev) {
+  if (!room.phz) return;
+  auto* t = room.phz.get();
+  const int timeout_s = cfg_.play_timeout_s;
+  auto uid_of = [&](int seat) -> int64_t {
+    if (seat < 0 || seat >= room.seat_count) return 0;
+    return room.seats[static_cast<size_t>(seat)].uid;
+  };
+
+  if (ev.type == "GameStart") {
+    const std::string snap = phz::ConfigSnapshotJson(phz::PhzConfig{});
+    for (int i = 0; i < room.seat_count; ++i) {
+      const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+      if (!uid) continue;
+      auto hand = PhzHandToList(t->seat(i).hand);
+      auto body = proto_wire::EncodeS2C_PhzGameStart(room.phz_round_id, room.room_id, room.template_id, t->banker_seat(),
+                                                    hand, t->wall_remain(), i, cfg_.base_score, snap);
+      hub_.Send(uid, MsgId::kS2C_PhzGameStart, body);
+    }
+    LogRound(room.phz_round_id, "server", "phz", room.room_id, uid_of(t->banker_seat()), t->banker_seat(), "start",
+             "wall=" + std::to_string(t->wall_remain()));
+    room.phase = "Play";
+    ArmPhzDeadline(room);
+    return;
+  }
+
+  if (ev.type == "Turn" || ev.type == "ClaimWindow") {
+    std::string sub = "discard";
+    if (ev.type == "ClaimWindow") sub = "claim";
+    else if (!ev.detail.empty()) sub = ev.detail;
+    int turn = t->turn_seat();
+    if (sub == "claim") {
+      turn = t->has_pending_reveal() ? t->last_reveal_seat() : t->last_discard_seat();
+    }
+    for (int i = 0; i < room.seat_count; ++i) {
+      const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+      if (!uid) continue;
+      // Claim: push to responders + source seat (source clears discard UI / waits).
+      if (ev.type == "ClaimWindow" && !t->SeatNeedsClaimInput(i) && i != turn) continue;
+      std::vector<int32_t> sync;
+      if (sub == "discard" && i == t->turn_seat()) sync = PhzHandToList(t->seat(i).hand);
+      const bool can_hu =
+          sub == "claim" ? t->SeatCanHu(i) : (sub == "discard" && i == t->turn_seat() && t->can_hu());
+      hub_.Send(uid, MsgId::kS2C_PhzTurn,
+                proto_wire::EncodeS2C_PhzTurn(turn, sub, timeout_s, t->wall_remain(), sync, can_hu));
+    }
+    ArmPhzDeadline(room);
+    return;
+  }
+
+  if (ev.type == "Draw") {
+    for (int i = 0; i < room.seat_count; ++i) {
+      const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+      if (!uid) continue;
+      const int tile = (i == ev.seat) ? ev.tile : -1;
+      hub_.Send(uid, MsgId::kS2C_PhzDraw, proto_wire::EncodeS2C_PhzDraw(ev.seat, tile));
+    }
+    return;
+  }
+
+  if (ev.type == "Reveal") {
+    auto body = proto_wire::EncodeS2C_PhzReveal(ev.seat, ev.tile);
+    for (int i = 0; i < room.seat_count; ++i) {
+      if (room.seats[static_cast<size_t>(i)].uid)
+        hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_PhzReveal, body);
+    }
+    return;
+  }
+
+  if (ev.type == "Discard") {
+    auto body = proto_wire::EncodeS2C_PhzDiscardBroadcast(ev.seat, ev.tile);
+    for (int i = 0; i < room.seat_count; ++i) {
+      if (room.seats[static_cast<size_t>(i)].uid)
+        hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_PhzDiscardBroadcast, body);
+    }
+    return;
+  }
+
+  if (ev.type == "Chi" || ev.type == "Peng" || ev.type == "Wei" || ev.type == "Pao" || ev.type == "Ti") {
+    const int act = PhzActionCode(ev.type);
+    const int meld_kind = ev.meld_kind ? ev.meld_kind : act;
+    auto body = proto_wire::EncodeS2C_PhzActionBroadcast(ev.seat, act, ev.tile, ev.tiles, ev.from_seat, meld_kind);
+    for (int i = 0; i < room.seat_count; ++i) {
+      if (room.seats[static_cast<size_t>(i)].uid)
+        hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_PhzActionBroadcast, body);
+    }
+    return;
+  }
+
+  if (ev.type == "Settle") {
+    ApplyPhzSettle(room);
+    return;
+  }
+
+  if (ev.type == "LiuJu") {
+    auto body = proto_wire::EncodeS2C_PhzLiuJu(t->banker_seat());
+    for (int i = 0; i < room.seat_count; ++i) {
+      if (room.seats[static_cast<size_t>(i)].uid)
+        hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_PhzLiuJu, body);
+    }
+    LogRound(room.phz_round_id, "server", "phz", room.room_id, uid_of(t->banker_seat()), t->banker_seat(), "liuju", "");
+    FinishPhzRound(room);
+  }
+}
+
+void RoomManager::ApplyPhzSettle(Room& room) {
+  if (!room.phz) return;
+  auto* t = room.phz.get();
+  auto plan = t->last_settle();
+  auto deltas = plan.deltas;
+  // rake on winner
+  int winner = plan.winner_seat;
+  if (winner >= 0 && winner < phz::kSeats && cfg_.rake_bp > 0 && deltas[static_cast<size_t>(winner)] > 0) {
+    const int64_t rake = deltas[static_cast<size_t>(winner)] * cfg_.rake_bp / 10000;
+    deltas[static_cast<size_t>(winner)] -= rake;
+  }
+  std::vector<proto_wire::SettleEntry> entries;
+  nlohmann::json players = nlohmann::json::array();
+  for (int i = 0; i < room.seat_count && i < phz::kSeats; ++i) {
+    const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+    const int64_t d = deltas[static_cast<size_t>(i)];
+    if (uid) {
+      wallet_.Adjust(uid, Currency::kGold, d, "game_settle", phz::IdemSettleKey(room.phz_round_id, uid));
+    }
+    proto_wire::SettleEntry e;
+    e.uid = uid;
+    e.seat_id = i;
+    e.delta_gold = d;
+    entries.push_back(e);
+    players.push_back({{"uid", uid},
+                       {"seat_id", i},
+                       {"delta", d},
+                       {"hu_xi", plan.hu_xi},
+                       {"tun", plan.tun},
+                       {"fan", plan.fan},
+                       {"ming_tang_mask", plan.ming_tang_mask}});
+  }
+  room.phz_banker = t->banker_seat();
+  const int32_t hu_tile = t->last_hu_tile() == phz::kTileInvalid ? -1 : static_cast<int32_t>(t->last_hu_tile());
+  auto body = proto_wire::EncodeS2C_PhzSettle(room.phz_round_id, winner, hu_tile, t->last_hu_draw(), plan.hu_xi, plan.tun,
+                                             plan.fan, plan.ming_tang_mask, cfg_.base_score, entries);
+  for (int i = 0; i < room.seat_count; ++i) {
+    if (room.seats[static_cast<size_t>(i)].uid)
+      hub_.Send(room.seats[static_cast<size_t>(i)].uid, MsgId::kS2C_PhzSettle, body);
+  }
+  LogRound(room.phz_round_id, "server", "phz", room.room_id,
+           winner >= 0 ? room.seats[static_cast<size_t>(winner)].uid : 0, winner, "settle",
+           "xi=" + std::to_string(plan.hu_xi) + " tun=" + std::to_string(plan.tun) + " fan=" + std::to_string(plan.fan));
+  if (admin_) {
+    admin_->RecordRound(room.phz_round_id, room.room_id, room.template_id, players.dump(), cfg_.base_score, plan.fan, 3);
+  }
+  if (social_) {
+    try {
+      social_->OnRoundSettled(room.phz_round_id, room.template_id, players.dump(), cfg_.base_score, plan.fan);
+    } catch (...) {
+    }
+  }
+  if (activity_) {
+    for (int i = 0; i < room.seat_count; ++i) {
+      const int64_t uid = room.seats[static_cast<size_t>(i)].uid;
+      if (!uid) continue;
+      try {
+        activity_->OnGameSettled(uid, room.template_id);
+      } catch (...) {
+      }
+    }
+  }
+  FinishPhzRound(room);
+}
+
+void RoomManager::FinishPhzRound(Room& room) {
+  room.phz_done = true;
+  room.phz.reset();
+  room.phase = "WaitReady";
+  PushRoomState(room.room_id);
+}
+
+void RoomManager::TickPhz(Room& room, std::chrono::steady_clock::time_point now) {
+  if (!room.phz || room.phz_done) return;
+  auto* t = room.phz.get();
+  if (t->phase() != phz::Phase::kPlay) return;
+
+  auto maybe_timeout = [&](int seat) {
+    if (seat < 0 || seat >= room.seat_count) return;
+    if (now >= room.phz_deadline) {
+      LogRound(room.phz_round_id, "server", "phz", room.room_id, room.seats[static_cast<size_t>(seat)].uid, seat,
+               "timeout", t->sub() == phz::PlaySub::kClaimWindow ? "claim" : "discard");
+      t->OnTimeout(seat);
+    }
+  };
+
+  if (t->sub() == phz::PlaySub::kClaimWindow) {
+    for (int i = 0; i < room.seat_count; ++i) {
+      if (t->SeatNeedsClaimInput(i)) maybe_timeout(i);
+      if (!room.phz || room.phz_done) return;
+    }
+  } else {
+    maybe_timeout(t->turn_seat());
+  }
+}
+
+void RoomManager::OnPhzDiscard(int64_t uid, int32_t tile) {
+  auto rid_opt = RoomOf(uid);
+  if (!rid_opt) return;
+  std::lock_guard<std::recursive_mutex> lk(Shard(*rid_opt).mu);
+  Room* r = FindRoomUnlocked(*rid_opt);
+  if (!r || !r->phz || r->phz_done) return;
+  const int seat = SeatOfUid(*r, uid);
+  if (seat < 0) return;
+  ClearTrusteeshipInRoom(*r, uid);
+  if (!r->phz->OnDiscard(seat, tile)) {
+    hub_.Send(uid, MsgId::kS2C_Error,
+              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "illegal discard",
+                                          MsgId::kC2S_PhzDiscard));
+  }
+}
+
+void RoomManager::OnPhzAction(int64_t uid, int32_t action, const std::vector<int32_t>& chi_hand) {
+  auto rid_opt = RoomOf(uid);
+  if (!rid_opt) return;
+  std::lock_guard<std::recursive_mutex> lk(Shard(*rid_opt).mu);
+  Room* r = FindRoomUnlocked(*rid_opt);
+  if (!r || !r->phz || r->phz_done) return;
+  const int seat = SeatOfUid(*r, uid);
+  if (seat < 0) return;
+  ClearTrusteeshipInRoom(*r, uid);
+  phz::ActionKind act = phz::ActionKind::kPass;
+  if (action == 1) act = phz::ActionKind::kChi;
+  else if (action == 2) act = phz::ActionKind::kPeng;
+  else if (action == 4) act = phz::ActionKind::kHu;
+  phz::ChiOption chi;
+  if (chi_hand.size() >= 2) {
+    chi.hand_tiles = {chi_hand[0], chi_hand[1]};
+  }
+  if (!r->phz->OnAction(seat, act, chi_hand.size() >= 2 ? &chi : nullptr)) {
+    hub_.Send(uid, MsgId::kS2C_Error,
+              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "action ignored",
+                                          MsgId::kC2S_PhzAction));
+  }
+}
+
 void RoomManager::TickHzmj(Room& room, std::chrono::steady_clock::time_point now) {
   if (!room.hzmj || room.hzmj_done) return;
   auto* t = room.hzmj.get();
@@ -590,6 +891,9 @@ void RoomManager::OnDisconnect(int64_t uid) {
   if (r->hzmj && !r->hzmj_done && seat >= 0) {
     LogRound(r->hzmj_round_id, "server", "hzmj", r->room_id, uid, seat, "disconnect",
              r->hzmj->sub() == hzmj::PlaySub::kClaimWindow ? "claim" : "play");
+  } else if (r->phz && !r->phz_done && seat >= 0) {
+    LogRound(r->phz_round_id, "server", "phz", r->room_id, uid, seat, "disconnect",
+             r->phz->sub() == phz::PlaySub::kClaimWindow ? "claim" : "play");
   } else if (r->game && !r->game->Finished() && seat >= 0) {
     LogRound(r->game->RoundId(), "server", "ddz", r->room_id, uid, seat, "disconnect", r->game->Phase());
   }
@@ -597,6 +901,10 @@ void RoomManager::OnDisconnect(int64_t uid) {
   if (r->hzmj && !r->hzmj_done && seat >= 0 && r->hzmj->phase() == hzmj::Phase::kPlay &&
       r->hzmj->sub() == hzmj::PlaySub::kClaimWindow && seat != r->hzmj->last_discard_seat()) {
     r->hzmj->OnTimeout(seat);
+  }
+  if (r->phz && !r->phz_done && seat >= 0 && r->phz->phase() == phz::Phase::kPlay &&
+      r->phz->sub() == phz::PlaySub::kClaimWindow && r->phz->SeatNeedsClaimInput(seat)) {
+    r->phz->OnTimeout(seat);
   }
   PushRoomState(r->room_id);
 }
@@ -687,6 +995,48 @@ void RoomManager::OnReconnect(int64_t uid) {
     const bool can_zimo = (sub == "discard" || sub == "piao") && t->can_zimo();
     hub_.Send(uid, MsgId::kS2C_HzmjTurn,
               proto_wire::EncodeS2C_HzmjTurn(turn, sub, left, t->wall_remain(), piao, sync_hand, can_zimo));
+  }
+  if (r->phz && !r->phz_done && seat >= 0) {
+    auto* t = r->phz.get();
+    auto hand = PhzHandToList(t->seat(seat).hand);
+    hub_.Send(uid, MsgId::kS2C_PhzGameStart,
+              proto_wire::EncodeS2C_PhzGameStart(r->phz_round_id, r->room_id, r->template_id, t->banker_seat(), hand,
+                                                t->wall_remain(), seat, cfg_.base_score, phz::ConfigSnapshotJson(phz::PhzConfig{})));
+    for (int s = 0; s < phz::kSeats; ++s) {
+      for (const auto& meld : t->seat(s).melds) {
+        const int meld_kind = static_cast<int>(meld.kind);
+        int act = meld_kind;
+        if (meld.kind == phz::MeldKind::kChi) act = 1;
+        else if (meld.kind == phz::MeldKind::kPeng) act = 2;
+        else if (meld.kind == phz::MeldKind::kWei || meld.kind == phz::MeldKind::kChouWei) act = 3;
+        else if (meld.kind == phz::MeldKind::kPao) act = 5;
+        else if (meld.kind == phz::MeldKind::kTi) act = 6;
+        hub_.Send(uid, MsgId::kS2C_PhzActionBroadcast,
+                  proto_wire::EncodeS2C_PhzActionBroadcast(s, act, meld.tile, meld.tiles, meld.from_seat, meld_kind));
+      }
+    }
+    if (t->last_discard() != phz::kTileInvalid && t->last_discard_seat() >= 0) {
+      hub_.Send(uid, MsgId::kS2C_PhzDiscardBroadcast,
+                proto_wire::EncodeS2C_PhzDiscardBroadcast(t->last_discard_seat(), t->last_discard()));
+    }
+    if (t->last_reveal() != phz::kTileInvalid && t->last_reveal_seat() >= 0 && t->sub() == phz::PlaySub::kClaimWindow) {
+      hub_.Send(uid, MsgId::kS2C_PhzReveal, proto_wire::EncodeS2C_PhzReveal(t->last_reveal_seat(), t->last_reveal()));
+    }
+    std::string sub = "discard";
+    int turn = t->turn_seat();
+    if (t->sub() == phz::PlaySub::kClaimWindow) {
+      sub = "claim";
+      turn = t->has_pending_reveal() ? t->last_reveal_seat() : t->last_discard_seat();
+    }
+    std::vector<int32_t> sync_hand;
+    if (sub == "discard" && seat == turn) sync_hand = hand;
+    const int left = SecondsLeft(r->phz_deadline);
+    const bool can_hu =
+        sub == "claim" ? t->SeatCanHu(seat) : (sub == "discard" && seat == turn && t->can_hu());
+    LogRound(r->phz_round_id, "server", "phz", r->room_id, uid, seat, "reconnect",
+             "sub=" + sub + " left=" + std::to_string(left));
+    hub_.Send(uid, MsgId::kS2C_PhzTurn,
+              proto_wire::EncodeS2C_PhzTurn(turn, sub, left, t->wall_remain(), sync_hand, can_hu));
   }
 }
 
@@ -876,6 +1226,9 @@ void RoomManager::Tick() {
       }
       if (r.hzmj && !r.hzmj_done) {
         TickHzmj(r, now);
+      }
+      if (r.phz && !r.phz_done) {
+        TickPhz(r, now);
       }
     }
   }

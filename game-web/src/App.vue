@@ -3,7 +3,9 @@ import { computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 
 const route = useRoute()
-const wide = computed(() => route.path === '/hzmj-lab' || route.path === '/ddz-lab')
+const wide = computed(
+  () => route.path === '/hzmj-lab' || route.path === '/ddz-lab' || route.path === '/phz-lab',
+)
 </script>
 
 <template>

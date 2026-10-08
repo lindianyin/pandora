@@ -112,6 +112,17 @@ constexpr uint32_t kS2C_HzmjSettle = 6009;
 constexpr uint32_t kS2C_HzmjLiuJu = 6010;
 constexpr uint32_t kC2S_HzmjGang = 6012;
 
+constexpr uint32_t kS2C_PhzGameStart = 7001;
+constexpr uint32_t kS2C_PhzTurn = 7002;
+constexpr uint32_t kS2C_PhzDraw = 7003;
+constexpr uint32_t kS2C_PhzReveal = 7004;
+constexpr uint32_t kC2S_PhzDiscard = 7005;
+constexpr uint32_t kS2C_PhzDiscardBroadcast = 7006;
+constexpr uint32_t kC2S_PhzAction = 7007;
+constexpr uint32_t kS2C_PhzActionBroadcast = 7008;
+constexpr uint32_t kS2C_PhzSettle = 7009;
+constexpr uint32_t kS2C_PhzLiuJu = 7010;
+
 constexpr uint32_t kC2S_ClientTrace = 9001;
 }  // namespace MsgId
 

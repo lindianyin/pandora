@@ -18,6 +18,7 @@ import {
   decodeS2C_HzmjLiuJu,
   sortDdzHand,
 } from './frame'
+import { C2S_HzmjAction, C2S_HzmjGang } from '../gen/game_hzmj'
 import { concat, encBytes, encPackedInt32, encString, encVarint } from './pbTestUtil'
 
 describe('frame wire', () => {
@@ -74,14 +75,15 @@ describe('tileLabel', () => {
 })
 
 describe('Hzmj C2S encode', () => {
-  it('discard / action / gang field layout', () => {
+  it('discard / action / gang round-trip via generated codec', () => {
     expect([...encodeC2S_HzmjDiscard(18)]).toEqual([...encVarint(1, 18)])
-    expect([...encodeC2S_HzmjAction(1, [0, 1])]).toEqual([
-      ...encVarint(1, 1),
-      ...encVarint(2, 0),
-      ...encVarint(2, 1),
-    ])
-    expect([...encodeC2S_HzmjGang(0, 5)]).toEqual([...encVarint(1, 0), ...encVarint(2, 5)])
+    // proto3 packed repeated int32 — assert semantic round-trip
+    const act = C2S_HzmjAction.decode(encodeC2S_HzmjAction(1, [0, 1]))
+    expect(act.action).toBe(1)
+    expect(act.chi_hand_tiles).toEqual([0, 1])
+    const gang = C2S_HzmjGang.decode(encodeC2S_HzmjGang(0, 5))
+    expect(gang.kind).toBe(0)
+    expect(gang.tile).toBe(5)
   })
 })
 

@@ -23,6 +23,7 @@ set(PROTO_FILES
   "${PROTO_DIR}/lobby.proto"
   "${PROTO_DIR}/game_ddz.proto"
   "${PROTO_DIR}/game_hzmj.proto"
+  "${PROTO_DIR}/game_phz.proto"
   "${PROTO_DIR}/activity.proto"
   "${PROTO_DIR}/social.proto"
   "${PROTO_DIR}/bag.proto"
@@ -33,6 +34,7 @@ set(GENERATED_SRCS
   "${GENERATED_DIR}/lobby.pb.cc"
   "${GENERATED_DIR}/game_ddz.pb.cc"
   "${GENERATED_DIR}/game_hzmj.pb.cc"
+  "${GENERATED_DIR}/game_phz.pb.cc"
   "${GENERATED_DIR}/activity.pb.cc"
   "${GENERATED_DIR}/social.pb.cc"
   "${GENERATED_DIR}/bag.pb.cc"
@@ -42,6 +44,7 @@ set(GENERATED_HDRS
   "${GENERATED_DIR}/lobby.pb.h"
   "${GENERATED_DIR}/game_ddz.pb.h"
   "${GENERATED_DIR}/game_hzmj.pb.h"
+  "${GENERATED_DIR}/game_phz.pb.h"
   "${GENERATED_DIR}/activity.pb.h"
   "${GENERATED_DIR}/social.pb.h"
   "${GENERATED_DIR}/bag.pb.h"
@@ -91,6 +94,12 @@ add_executable(pandora-server
   src/game/hzmj/score.cpp
   src/game/hzmj/settle.cpp
   src/game/hzmj/table.cpp
+  src/game/phz/tiles.cpp
+  src/game/phz/config.cpp
+  src/game/phz/meld.cpp
+  src/game/phz/hu.cpp
+  src/game/phz/settle.cpp
+  src/game/phz/table.cpp
 )
 
 target_include_directories(pandora-server PRIVATE
@@ -142,6 +151,27 @@ add_executable(hzmj_table_test
   src/game/hzmj/table.cpp
 )
 target_include_directories(hzmj_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(phz_rules_test
+  tests/phz_rules_test.cpp
+  src/game/phz/tiles.cpp
+  src/game/phz/config.cpp
+  src/game/phz/meld.cpp
+  src/game/phz/hu.cpp
+  src/game/phz/settle.cpp
+)
+target_include_directories(phz_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(phz_table_test
+  tests/phz_table_test.cpp
+  src/game/phz/tiles.cpp
+  src/game/phz/config.cpp
+  src/game/phz/meld.cpp
+  src/game/phz/hu.cpp
+  src/game/phz/settle.cpp
+  src/game/phz/table.cpp
+)
+target_include_directories(phz_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_custom_command(TARGET pandora-server POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:pandora-server>/conf

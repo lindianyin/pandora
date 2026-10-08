@@ -1,3 +1,60 @@
+/**
+ * Wire framing + thin wrappers over ts-proto generated messages (src/gen).
+ * Regenerate: powershell -File scripts/gen-proto.ps1
+ */
+import {
+  C2S_Auth,
+  C2S_ClientTrace,
+  C2S_Heartbeat,
+  S2C_AuthResult,
+  S2C_Error,
+} from '../gen/common'
+import {
+  C2S_CancelMatch,
+  C2S_GetLobby,
+  C2S_LeaveRoom,
+  C2S_QuickMatch,
+  C2S_Ready,
+  S2C_LobbyInfo,
+  S2C_MatchStatus,
+  S2C_RoomState,
+} from '../gen/lobby'
+import {
+  C2S_DdzBid,
+  C2S_DdzPlay,
+  S2C_DdzBidBroadcast,
+  S2C_DdzGameStart,
+  S2C_DdzPlayBroadcast,
+  S2C_DdzReconnect,
+  S2C_DdzSettle,
+  S2C_DdzTurn,
+} from '../gen/game_ddz'
+import {
+  C2S_HzmjAction,
+  C2S_HzmjDiscard,
+  C2S_HzmjGang,
+  S2C_HzmjActionBroadcast,
+  S2C_HzmjDiscardBroadcast,
+  S2C_HzmjDraw,
+  S2C_HzmjGameStart,
+  S2C_HzmjLiuJu,
+  S2C_HzmjSettle,
+  S2C_HzmjTurn,
+} from '../gen/game_hzmj'
+import {
+  C2S_PhzAction,
+  C2S_PhzDiscard,
+  S2C_PhzActionBroadcast,
+  S2C_PhzDiscardBroadcast,
+  S2C_PhzDraw,
+  S2C_PhzGameStart,
+  S2C_PhzLiuJu,
+  S2C_PhzReveal,
+  S2C_PhzSettle,
+  S2C_PhzTurn,
+} from '../gen/game_phz'
+import { S2C_ActivityUpdate } from '../gen/activity'
+
 export const MsgId = {
   C2S_Auth: 1,
   S2C_AuthResult: 2,
@@ -33,6 +90,16 @@ export const MsgId = {
   S2C_HzmjSettle: 6009,
   S2C_HzmjLiuJu: 6010,
   C2S_HzmjGang: 6012,
+  S2C_PhzGameStart: 7001,
+  S2C_PhzTurn: 7002,
+  S2C_PhzDraw: 7003,
+  S2C_PhzReveal: 7004,
+  C2S_PhzDiscard: 7005,
+  S2C_PhzDiscardBroadcast: 7006,
+  C2S_PhzAction: 7007,
+  S2C_PhzActionBroadcast: 7008,
+  S2C_PhzSettle: 7009,
+  S2C_PhzLiuJu: 7010,
   C2S_ClientTrace: 9001,
 } as const
 
@@ -82,160 +149,8 @@ export function tryDecodeFrames(buffer: Uint8Array): { frames: DecodedFrame[]; r
   return { frames, rest: buffer.slice(offset) }
 }
 
-function appendVarint(out: number[], v: number) {
-  let n = v >>> 0
-  while (n >= 0x80) {
-    out.push((n & 0x7f) | 0x80)
-    n >>>= 7
-  }
-  out.push(n)
-}
-
-function encodeStringField(fieldNumber: number, value: string): Uint8Array {
-  const bytes = new TextEncoder().encode(value)
-  const out: number[] = []
-  appendVarint(out, (fieldNumber << 3) | 2)
-  appendVarint(out, bytes.length)
-  for (const b of bytes) out.push(b)
-  return new Uint8Array(out)
-}
-
-function encodeVarintField(fieldNumber: number, value: number): Uint8Array {
-  const out: number[] = []
-  appendVarint(out, (fieldNumber << 3) | 0)
-  appendVarint(out, value >>> 0)
-  return new Uint8Array(out)
-}
-
-function encodeInt64Field(fieldNumber: number, value: number): Uint8Array {
-  const out: number[] = []
-  appendVarint(out, (fieldNumber << 3) | 0)
-  let n = BigInt(value)
-  if (n < 0n) n = (1n << 64n) + n
-  while (n >= 0x80n) {
-    out.push(Number(n & 0x7fn) | 0x80)
-    n >>= 7n
-  }
-  out.push(Number(n))
-  return new Uint8Array(out)
-}
-
-function encodeBoolField(fieldNumber: number, value: boolean): Uint8Array {
-  return encodeVarintField(fieldNumber, value ? 1 : 0)
-}
-
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const n = parts.reduce((s, p) => s + p.length, 0)
-  const out = new Uint8Array(n)
-  let o = 0
-  for (const p of parts) {
-    out.set(p, o)
-    o += p.length
-  }
-  return out
-}
-
-function readVarint(buf: Uint8Array, pos: { i: number }): number {
-  let result = 0
-  let shift = 0
-  while (pos.i < buf.length) {
-    const b = buf[pos.i++]!
-    result |= (b & 0x7f) << shift
-    if ((b & 0x80) === 0) return result >>> 0
-    shift += 7
-  }
-  return result
-}
-
-function readVarintBig(buf: Uint8Array, pos: { i: number }): bigint {
-  let result = 0n
-  let shift = 0n
-  while (pos.i < buf.length) {
-    const b = BigInt(buf[pos.i++]!)
-    result |= (b & 0x7fn) << shift
-    if ((b & 0x80n) === 0n) return result
-    shift += 7n
-  }
-  return result
-}
-
-export function encodeC2S_Auth(token: string): Uint8Array {
-  return encodeStringField(1, token)
-}
-
-export function encodeC2S_ClientTrace(
-  roundId: number,
-  seatId: number,
-  event: string,
-  detail: string,
-  game: string,
-): Uint8Array {
-  const ev = event.slice(0, 40)
-  const text = detail.replace(/[\r\n\t]/g, ' ').slice(0, 500)
-  return concat(
-    encodeInt64Field(1, roundId),
-    encodeVarintField(2, seatId),
-    encodeStringField(3, ev),
-    encodeStringField(4, text),
-    encodeStringField(5, game),
-  )
-}
-
-export function encodeC2S_Heartbeat(clientTimeMs: number): Uint8Array {
-  return encodeInt64Field(1, clientTimeMs)
-}
-
-export function encodeC2S_GetLobby(): Uint8Array {
-  return new Uint8Array(0)
-}
-
-export function encodeC2S_QuickMatch(templateId: number): Uint8Array {
-  return encodeVarintField(1, templateId)
-}
-
-export function encodeC2S_CancelMatch(): Uint8Array {
-  return new Uint8Array(0)
-}
-
-export function encodeC2S_Ready(ready: boolean): Uint8Array {
-  return encodeBoolField(1, ready)
-}
-
-export function encodeC2S_LeaveRoom(): Uint8Array {
-  return new Uint8Array(0)
-}
-
-export function encodeC2S_DdzBid(score: number): Uint8Array {
-  return encodeVarintField(1, score)
-}
-
-export function encodeC2S_DdzPlay(pass: boolean, cards: number[]): Uint8Array {
-  const parts: Uint8Array[] = [encodeBoolField(1, pass)]
-  for (const c of cards) parts.push(encodeVarintField(2, c))
-  return concat(...parts)
-}
-
-export function decodeS2C_AuthResult(body: Uint8Array): { code: number; message: string; uid: number } {
-  let code = 0
-  let message = ''
-  let uid = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) code = v
-      if (fn === 3) uid = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 2) message = new TextDecoder().decode(slice)
-    } else break
-  }
-  return { code, message, uid }
+function enc<T>(fn: { encode(m: T): { finish(): Uint8Array } }, msg: T): Uint8Array {
+  return fn.encode(msg).finish()
 }
 
 export type LobbyTemplate = {
@@ -249,100 +164,6 @@ export type LobbyTemplate = {
   players: number
 }
 
-function decodeSubMessage(slice: Uint8Array): Record<number, unknown> {
-  const fields: Record<number, unknown> = {}
-  const pos = { i: 0 }
-  while (pos.i < slice.length) {
-    const tag = readVarint(slice, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      fields[fn] = readVarintBig(slice, pos)
-    } else if (wt === 2) {
-      const len = readVarint(slice, pos)
-      const s = slice.slice(pos.i, pos.i + len)
-      pos.i += len
-      fields[fn] = s
-    } else break
-  }
-  return fields
-}
-
-function asNum(v: unknown): number {
-  if (typeof v === 'bigint') return Number(v)
-  if (typeof v === 'number') return v
-  return 0
-}
-
-function asSigned64(v: unknown): number {
-  if (typeof v !== 'bigint' && typeof v !== 'number') return 0
-  const u = typeof v === 'bigint' ? v : BigInt(v)
-  if (u >= 1n << 63n) return Number(u - (1n << 64n))
-  return Number(u)
-}
-
-export function decodeS2C_LobbyInfo(body: Uint8Array): {
-  templates: LobbyTemplate[]
-  gold: number
-  diamond: number
-} {
-  const templates: LobbyTemplate[] = []
-  let gold = 0
-  let diamond = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 2) gold = v
-      if (fn === 3) diamond = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 1) {
-        const f = decodeSubMessage(slice)
-        templates.push({
-          id: asNum(f[1]),
-          name: f[2] instanceof Uint8Array ? new TextDecoder().decode(f[2]) : '',
-          base_score: asNum(f[3]),
-          min_gold: asNum(f[4]),
-          max_gold: asNum(f[5]),
-          enabled: !!asNum(f[6]),
-          game_id: asNum(f[7]) || 1,
-          players: asNum(f[8]) || (asNum(f[7]) === 2 ? 4 : 3),
-        })
-      }
-    } else break
-  }
-  return { templates, gold, diamond }
-}
-
-export function decodeS2C_MatchStatus(body: Uint8Array): { status: number; room_id: number; message: string } {
-  let status = 0
-  let room_id = 0
-  let message = ''
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) status = v
-      if (fn === 2) room_id = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 3) message = new TextDecoder().decode(slice)
-    } else break
-  }
-  return { status, room_id, message }
-}
-
 export type RoomSeat = {
   seat_id: number
   uid: number
@@ -352,45 +173,182 @@ export type RoomSeat = {
   trusteeship: boolean
 }
 
+export type HzmjGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  banker_seat: number
+  lian_zhuang: number
+  N: number
+  caishen: number[]
+  self_hand: number[]
+  wall_remain: number
+  self_seat: number
+  base_score: number
+}
+
+export type HzmjSettle = {
+  round_id: number
+  winner_seat: number
+  hu_tile: number
+  is_zimo: boolean
+  shooter_seat: number
+  M: number
+  N: number
+  contractor_seat: number
+  base_score: number
+  entries: { uid: number; seat_id: number; delta_gold: number }[]
+}
+
+export type PhzGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  banker_seat: number
+  self_hand: number[]
+  wall_remain: number
+  self_seat: number
+  base_score: number
+  cfg_snapshot: string
+}
+
+export type PhzSettle = {
+  round_id: number
+  winner_seat: number
+  hu_tile: number
+  is_draw_win: boolean
+  hu_xi: number
+  tun: number
+  fan: number
+  ming_tang_mask: number
+  base_score: number
+  entries: { uid: number; seat_id: number; delta_gold: number }[]
+}
+
+export function encodeC2S_Auth(token: string): Uint8Array {
+  return enc(C2S_Auth, { token })
+}
+
+export function encodeC2S_ClientTrace(
+  roundId: number,
+  seatId: number,
+  event: string,
+  detail: string,
+  game: string,
+): Uint8Array {
+  return enc(C2S_ClientTrace, {
+    round_id: roundId,
+    seat_id: seatId,
+    event: event.slice(0, 40),
+    detail: detail.replace(/[\r\n\t]/g, ' ').slice(0, 500),
+    game,
+  })
+}
+
+export function encodeC2S_Heartbeat(clientTimeMs: number): Uint8Array {
+  return enc(C2S_Heartbeat, { client_time_ms: clientTimeMs })
+}
+
+export function encodeC2S_GetLobby(): Uint8Array {
+  return enc(C2S_GetLobby, {})
+}
+
+export function encodeC2S_QuickMatch(templateId: number): Uint8Array {
+  return enc(C2S_QuickMatch, { template_id: templateId })
+}
+
+export function encodeC2S_CancelMatch(): Uint8Array {
+  return enc(C2S_CancelMatch, {})
+}
+
+export function encodeC2S_Ready(ready: boolean): Uint8Array {
+  return enc(C2S_Ready, { ready })
+}
+
+export function encodeC2S_LeaveRoom(): Uint8Array {
+  return enc(C2S_LeaveRoom, {})
+}
+
+export function encodeC2S_DdzBid(score: number): Uint8Array {
+  return enc(C2S_DdzBid, { score })
+}
+
+export function encodeC2S_DdzPlay(pass: boolean, cards: number[]): Uint8Array {
+  return enc(C2S_DdzPlay, { pass, cards })
+}
+
+export function encodeC2S_HzmjDiscard(tile: number): Uint8Array {
+  return enc(C2S_HzmjDiscard, { tile })
+}
+
+export function encodeC2S_HzmjAction(action: number, chiHand: number[] = []): Uint8Array {
+  return enc(C2S_HzmjAction, { action, chi_hand_tiles: chiHand })
+}
+
+export function encodeC2S_HzmjGang(kind: number, tile: number): Uint8Array {
+  return enc(C2S_HzmjGang, { kind, tile })
+}
+
+export function encodeC2S_PhzDiscard(tile: number): Uint8Array {
+  return enc(C2S_PhzDiscard, { tile })
+}
+
+export function encodeC2S_PhzAction(action: number, chiHand: number[] = []): Uint8Array {
+  return enc(C2S_PhzAction, { action, chi_hand_tiles: chiHand })
+}
+
+export function decodeS2C_AuthResult(body: Uint8Array): { code: number; message: string; uid: number } {
+  const m = S2C_AuthResult.decode(body)
+  return { code: m.code, message: m.message, uid: m.uid }
+}
+
+export function decodeS2C_LobbyInfo(body: Uint8Array): {
+  templates: LobbyTemplate[]
+  gold: number
+  diamond: number
+} {
+  const m = S2C_LobbyInfo.decode(body)
+  return {
+    templates: m.templates.map((t) => ({
+      id: t.id,
+      name: t.name,
+      base_score: t.base_score,
+      min_gold: t.min_gold,
+      max_gold: t.max_gold,
+      enabled: t.enabled,
+      game_id: t.game_id || 1,
+      players: t.players || (t.game_id === 2 ? 4 : 3),
+    })),
+    gold: m.gold,
+    diamond: m.diamond,
+  }
+}
+
+export function decodeS2C_MatchStatus(body: Uint8Array): { status: number; room_id: number; message: string } {
+  const m = S2C_MatchStatus.decode(body)
+  return { status: Number(m.status), room_id: m.room_id, message: m.message }
+}
+
 export function decodeS2C_RoomState(body: Uint8Array): {
   room_id: number
   template_id: number
   seats: RoomSeat[]
   phase: string
 } {
-  let room_id = 0
-  let template_id = 0
-  let phase = ''
-  const seats: RoomSeat[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) room_id = v
-      if (fn === 2) template_id = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 3) {
-        const f = decodeSubMessage(slice)
-        seats.push({
-          seat_id: asNum(f[1]),
-          uid: asNum(f[2]),
-          nickname: f[3] instanceof Uint8Array ? new TextDecoder().decode(f[3]) : '',
-          ready: !!asNum(f[4]),
-          online: f[5] === undefined ? true : !!asNum(f[5]),
-          trusteeship: !!asNum(f[6]),
-        })
-      } else if (fn === 4) {
-        phase = new TextDecoder().decode(slice)
-      }
-    } else break
+  const m = S2C_RoomState.decode(body)
+  return {
+    room_id: m.room_id,
+    template_id: m.template_id,
+    phase: m.phase,
+    seats: m.seats.map((s) => ({
+      seat_id: s.seat_id,
+      uid: s.uid,
+      nickname: s.nickname,
+      ready: s.ready,
+      online: s.online,
+      trusteeship: false,
+    })),
   }
-  return { room_id, template_id, seats, phase }
 }
 
 export function decodeS2C_DdzGameStart(body: Uint8Array): {
@@ -400,73 +358,24 @@ export function decodeS2C_DdzGameStart(body: Uint8Array): {
   bottom_cards: number[]
   round_id: number
 } {
-  let seat_id = 0
-  let landlord_seat = -1
-  let round_id = 0
-  const hand_cards: number[] = []
-  const bottom_cards: number[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const raw = readVarintBig(body, pos)
-      const v = Number(raw)
-      if (fn === 1) seat_id = v
-      if (fn === 2) hand_cards.push(v)
-      if (fn === 3) landlord_seat = asSigned64(raw)
-      if (fn === 4) bottom_cards.push(v)
-      if (fn === 5) round_id = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const end = pos.i + len
-      if (fn === 2) while (pos.i < end) hand_cards.push(Number(readVarintBig(body, pos)))
-      else if (fn === 4) while (pos.i < end) bottom_cards.push(Number(readVarintBig(body, pos)))
-      else pos.i = end
-    } else break
+  const m = S2C_DdzGameStart.decode(body)
+  return {
+    seat_id: m.seat_id,
+    hand_cards: [...m.hand_cards],
+    landlord_seat: m.landlord_seat,
+    bottom_cards: [...m.bottom_cards],
+    round_id: m.round_id,
   }
-  return { seat_id, hand_cards, landlord_seat, bottom_cards, round_id }
 }
 
 export function decodeS2C_DdzTurn(body: Uint8Array): { seat_id: number; phase: string; timeout_s: number } {
-  let seat_id = 0
-  let phase = ''
-  let timeout_s = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) seat_id = v
-      if (fn === 3) timeout_s = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 2) phase = new TextDecoder().decode(slice)
-    } else break
-  }
-  return { seat_id, phase, timeout_s }
+  const m = S2C_DdzTurn.decode(body)
+  return { seat_id: m.seat_id, phase: m.phase, timeout_s: m.timeout_s }
 }
 
 export function decodeS2C_DdzBidBroadcast(body: Uint8Array): { seat_id: number; score: number } {
-  let seat_id = 0
-  let score = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) seat_id = v
-      if (fn === 2) score = v
-    } else break
-  }
-  return { seat_id, score }
+  const m = S2C_DdzBidBroadcast.decode(body)
+  return { seat_id: m.seat_id, score: m.score }
 }
 
 export function decodeS2C_DdzPlayBroadcast(body: Uint8Array): {
@@ -475,29 +384,8 @@ export function decodeS2C_DdzPlayBroadcast(body: Uint8Array): {
   cards: number[]
   cards_left: number
 } {
-  let seat_id = 0
-  let pass = false
-  let cards_left = 0
-  const cards: number[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) seat_id = v
-      if (fn === 2) pass = !!v
-      if (fn === 3) cards.push(v)
-      if (fn === 4) cards_left = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const end = pos.i + len
-      if (fn === 3) while (pos.i < end) cards.push(Number(readVarintBig(body, pos)))
-      else pos.i = end
-    } else break
-  }
-  return { seat_id, pass, cards, cards_left }
+  const m = S2C_DdzPlayBroadcast.decode(body)
+  return { seat_id: m.seat_id, pass: m.pass, cards: [...m.cards], cards_left: m.cards_left }
 }
 
 export function decodeS2C_DdzSettle(body: Uint8Array): {
@@ -506,36 +394,13 @@ export function decodeS2C_DdzSettle(body: Uint8Array): {
   multiplier: number
   entries: { uid: number; seat_id: number; delta_gold: number }[]
 } {
-  let round_id = 0
-  let base_score = 0
-  let multiplier = 0
-  const entries: { uid: number; seat_id: number; delta_gold: number }[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      // signed int64 for delta stored as uint varint — for round_id etc positive OK
-      if (fn === 1) round_id = v
-      if (fn === 2) base_score = v
-      if (fn === 3) multiplier = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 4) {
-        const f = decodeSubMessage(slice)
-        entries.push({
-          uid: asNum(f[1]),
-          seat_id: asNum(f[2]),
-          delta_gold: asSigned64(f[3]),
-        })
-      }
-    } else break
+  const m = S2C_DdzSettle.decode(body)
+  return {
+    round_id: m.round_id,
+    base_score: m.base_score,
+    multiplier: m.multiplier,
+    entries: m.entries.map((e) => ({ uid: e.uid, seat_id: e.seat_id, delta_gold: e.delta_gold })),
   }
-  return { round_id, base_score, multiplier, entries }
 }
 
 export function decodeS2C_DdzReconnect(body: Uint8Array): {
@@ -546,40 +411,15 @@ export function decodeS2C_DdzReconnect(body: Uint8Array): {
   current_seat: number
   timeout_s: number
 } {
-  let seat_id = 0
-  let phase = ''
-  let landlord_seat = -1
-  let current_seat = -1
-  let timeout_s = 0
-  const hand: number[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const raw = readVarintBig(body, pos)
-      const v = Number(raw)
-      if (fn === 1) seat_id = v
-      if (fn === 3) hand.push(v)
-      if (fn === 4) landlord_seat = asSigned64(raw)
-      if (fn === 5) current_seat = asSigned64(raw)
-      if (fn === 6) timeout_s = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      if (fn === 2) {
-        phase = new TextDecoder().decode(slice)
-        pos.i += len
-      } else if (fn === 3) {
-        const end = pos.i + len
-        while (pos.i < end) hand.push(Number(readVarintBig(body, pos)))
-      } else {
-        pos.i += len
-      }
-    } else break
+  const m = S2C_DdzReconnect.decode(body)
+  return {
+    seat_id: m.seat_id,
+    phase: m.phase,
+    hand: [...m.hand_cards],
+    landlord_seat: m.landlord_seat,
+    current_seat: m.current_seat,
+    timeout_s: m.timeout_s,
   }
-  return { seat_id, phase, hand, landlord_seat, current_seat, timeout_s }
 }
 
 export function decodeS2C_ActivityUpdate(body: Uint8Array): {
@@ -588,54 +428,20 @@ export function decodeS2C_ActivityUpdate(body: Uint8Array): {
   progress_json: string
   claimable: boolean
 } {
-  let activity_id = 0
-  let type = ''
-  let progress_json = '{}'
-  let claimable = false
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) activity_id = v
-      if (fn === 4) claimable = !!v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 2) type = new TextDecoder().decode(slice)
-      if (fn === 3) progress_json = new TextDecoder().decode(slice)
-    } else break
+  const m = S2C_ActivityUpdate.decode(body)
+  return {
+    activity_id: m.activity_id,
+    type: m.type,
+    progress_json: m.progress_json,
+    claimable: m.claimable,
   }
-  return { activity_id, type, progress_json, claimable }
 }
 
 export function decodeS2C_Error(body: Uint8Array): { code: number; message: string; ref_msg_id: number } {
-  let code = 0
-  let message = ''
-  let ref_msg_id = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) code = v
-      if (fn === 3) ref_msg_id = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 2) message = new TextDecoder().decode(slice)
-    } else break
-  }
-  return { code, message, ref_msg_id }
+  const m = S2C_Error.decode(body)
+  return { code: m.code, message: m.message, ref_msg_id: m.ref_msg_id }
 }
 
-/** Card display: 0-51 ranks 3..2, 52/53 jokers */
 export function cardLabel(card: number): string {
   if (card === 52) return '小王'
   if (card === 53) return '大王'
@@ -644,7 +450,7 @@ export function cardLabel(card: number): string {
   return suits[Math.floor(card / 13) % 4]! + ranks[card % 13]!
 }
 
-/** Sort for display: 3..A,2 then jokers; same rank by suit. */
+/** DDZ card sort: by card id rank within suit encoding (c%13), jokers last */
 export function sortDdzHand(cards: number[]): number[] {
   const rankKey = (c: number) => (c >= 52 ? 100 + (c - 52) : c % 13)
   const suitKey = (c: number) => (c >= 52 ? 0 : Math.floor(c / 13) % 4)
@@ -667,89 +473,20 @@ export function tileLabel(tile: number): string {
   return dragons[tile - 31]!
 }
 
-export function encodeC2S_HzmjDiscard(tile: number): Uint8Array {
-  return encodeVarintField(1, tile)
-}
-
-export function encodeC2S_HzmjAction(action: number, chiHand: number[] = []): Uint8Array {
-  const parts: Uint8Array[] = [encodeVarintField(1, action)]
-  for (const t of chiHand) parts.push(encodeVarintField(2, t))
-  return concat(...parts)
-}
-
-export function encodeC2S_HzmjGang(kind: number, tile: number): Uint8Array {
-  return concat(encodeVarintField(1, kind), encodeVarintField(2, tile))
-}
-
-export type HzmjGameStart = {
-  round_id: number
-  room_id: number
-  template_id: number
-  banker_seat: number
-  lian_zhuang: number
-  N: number
-  caishen: number[]
-  self_hand: number[]
-  wall_remain: number
-  self_seat: number
-  base_score: number
-}
-
 export function decodeS2C_HzmjGameStart(body: Uint8Array): HzmjGameStart {
-  let round_id = 0
-  let room_id = 0
-  let template_id = 0
-  let banker_seat = 0
-  let lian_zhuang = 1
-  let N = 2
-  const caishen: number[] = []
-  const self_hand: number[] = []
-  let wall_remain = 0
-  let self_seat = 0
-  let base_score = 100
-  let hasSelfSeat = false
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) round_id = v
-      if (fn === 2) room_id = v
-      if (fn === 3) template_id = v
-      if (fn === 4) banker_seat = v
-      if (fn === 5) lian_zhuang = v
-      if (fn === 6) N = v
-      if (fn === 7) caishen.push(v)
-      if (fn === 8) self_hand.push(v)
-      if (fn === 9) wall_remain = v
-      if (fn === 10) {
-        self_seat = v
-        hasSelfSeat = true
-      }
-      if (fn === 11) base_score = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const end = pos.i + len
-      if (fn === 7) while (pos.i < end) caishen.push(Number(readVarintBig(body, pos)))
-      else if (fn === 8) while (pos.i < end) self_hand.push(Number(readVarintBig(body, pos)))
-      else pos.i = end
-    } else break
-  }
-  if (!hasSelfSeat) self_seat = 0
+  const m = S2C_HzmjGameStart.decode(body)
   return {
-    round_id,
-    room_id,
-    template_id,
-    banker_seat,
-    lian_zhuang,
-    N,
-    caishen,
-    self_hand,
-    wall_remain,
-    self_seat,
-    base_score,
+    round_id: m.round_id,
+    room_id: m.room_id,
+    template_id: m.template_id,
+    banker_seat: m.banker_seat,
+    lian_zhuang: m.lian_zhuang,
+    N: m.N,
+    caishen: [...m.caishen_tiles],
+    self_hand: [...m.self_hand],
+    wall_remain: m.wall_remain,
+    self_seat: m.self_seat ?? 0,
+    base_score: m.base_score,
   }
 }
 
@@ -762,79 +499,26 @@ export function decodeS2C_HzmjTurn(body: Uint8Array): {
   self_hand: number[]
   can_zimo: boolean
 } {
-  let seat_id = 0
-  let sub = ''
-  let timeout_s = 0
-  let wall_remain = 0
-  let piao_seat = -1
-  let can_zimo = false
-  const self_hand: number[] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const raw = readVarintBig(body, pos)
-      const v = Number(raw)
-      if (fn === 1) seat_id = v
-      if (fn === 3) timeout_s = v
-      if (fn === 4) wall_remain = v
-      if (fn === 5) piao_seat = asSigned64(raw)
-      if (fn === 6) self_hand.push(v)
-      if (fn === 7) can_zimo = v !== 0
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const end = pos.i + len
-      if (fn === 2) {
-        sub = new TextDecoder().decode(body.slice(pos.i, end))
-        pos.i = end
-      } else if (fn === 6) {
-        while (pos.i < end) self_hand.push(Number(readVarintBig(body, pos)))
-      } else pos.i = end
-    } else break
+  const m = S2C_HzmjTurn.decode(body)
+  return {
+    seat_id: m.seat_id ?? 0,
+    sub: m.sub,
+    timeout_s: m.timeout_s,
+    wall_remain: m.wall_remain,
+    piao_seat: m.piao_seat,
+    self_hand: [...m.self_hand],
+    can_zimo: m.can_zimo,
   }
-  return { seat_id, sub, timeout_s, wall_remain, piao_seat, self_hand, can_zimo }
 }
 
 export function decodeS2C_HzmjDraw(body: Uint8Array): { seat_id: number; tile: number } {
-  let seat_id = 0
-  let tile = -1
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const raw = readVarintBig(body, pos)
-      if (fn === 1) seat_id = Number(raw)
-      if (fn === 2) tile = asSigned64(raw)
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      pos.i += len
-    } else break
-  }
-  return { seat_id, tile }
+  const m = S2C_HzmjDraw.decode(body)
+  return { seat_id: m.seat_id, tile: m.tile }
 }
 
 export function decodeS2C_HzmjDiscardBroadcast(body: Uint8Array): { seat_id: number; tile: number } {
-  let seat_id = 0
-  let tile = 0
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) seat_id = v
-      if (fn === 2) tile = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      pos.i += len
-    } else break
-  }
-  return { seat_id, tile }
+  const m = S2C_HzmjDiscardBroadcast.decode(body)
+  return { seat_id: m.seat_id ?? 0, tile: m.tile }
 }
 
 export function decodeS2C_HzmjActionBroadcast(body: Uint8Array): {
@@ -845,125 +529,138 @@ export function decodeS2C_HzmjActionBroadcast(body: Uint8Array): {
   from_seat: number
   meld_kind: number
 } {
-  let seat_id = 0
-  let action = 0
-  let tile = 0
-  const tiles: number[] = []
-  let from_seat = -1
-  let meld_kind = 0
-  let hasFrom = false
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) seat_id = v
-      if (fn === 2) action = v
-      if (fn === 3) tile = v
-      if (fn === 4) tiles.push(v)
-      if (fn === 5) {
-        from_seat = v
-        hasFrom = true
-      }
-      if (fn === 6) meld_kind = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const end = pos.i + len
-      if (fn === 4) while (pos.i < end) tiles.push(Number(readVarintBig(body, pos)))
-      else pos.i = end
-    } else break
+  const m = S2C_HzmjActionBroadcast.decode(body)
+  return {
+    seat_id: m.seat_id,
+    action: m.action,
+    tile: m.tile,
+    tiles: [...m.tiles],
+    from_seat: m.from_seat ?? -1,
+    meld_kind: m.meld_kind,
   }
-  if (!hasFrom) from_seat = -1
-  return { seat_id, action, tile, tiles, from_seat, meld_kind }
-}
-
-export type HzmjSettle = {
-  round_id: number
-  winner_seat: number
-  hu_tile: number
-  is_zimo: boolean
-  shooter_seat: number
-  M: number
-  N: number
-  contractor_seat: number
-  base_score: number
-  entries: { uid: number; seat_id: number; delta_gold: number }[]
 }
 
 export function decodeS2C_HzmjSettle(body: Uint8Array): HzmjSettle {
-  let round_id = 0
-  let winner_seat = 0
-  let hu_tile = -1
-  let is_zimo = false // proto3 omits false bool; default must not be true
-  let shooter_seat = -1
-  let M = 1
-  let N = 2
-  let contractor_seat = -1
-  let base_score = 100
-  const entries: HzmjSettle['entries'] = []
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const raw = readVarintBig(body, pos)
-      const v = Number(raw)
-      if (fn === 1) round_id = v
-      if (fn === 2) winner_seat = v
-      if (fn === 3) hu_tile = asSigned64(raw)
-      if (fn === 4) is_zimo = !!v
-      if (fn === 5) shooter_seat = asSigned64(raw)
-      if (fn === 6) M = v
-      if (fn === 7) N = v
-      if (fn === 8) contractor_seat = asSigned64(raw)
-      if (fn === 9) base_score = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      const slice = body.slice(pos.i, pos.i + len)
-      pos.i += len
-      if (fn === 10) {
-        const f = decodeSubMessage(slice)
-        entries.push({
-          uid: asNum(f[1]),
-          seat_id: asNum(f[2]),
-          delta_gold: asSigned64(f[3] ?? 0),
-        })
-      }
-    } else break
-  }
+  const m = S2C_HzmjSettle.decode(body)
   return {
-    round_id,
-    winner_seat,
-    hu_tile,
-    is_zimo,
-    shooter_seat,
-    M,
-    N,
-    contractor_seat,
-    base_score,
-    entries,
+    round_id: m.round_id,
+    winner_seat: m.winner_seat,
+    hu_tile: m.hu_tile,
+    is_zimo: m.is_zimo,
+    shooter_seat: m.shooter_seat,
+    M: m.M,
+    N: m.N,
+    contractor_seat: m.contractor_seat,
+    base_score: m.base_score,
+    entries: m.entries.map((e) => ({ uid: e.uid, seat_id: e.seat_id, delta_gold: e.delta_gold })),
   }
 }
 
 export function decodeS2C_HzmjLiuJu(body: Uint8Array): { lian_zhuang: number } {
-  let lian_zhuang = 1
-  const pos = { i: 0 }
-  while (pos.i < body.length) {
-    const tag = readVarint(body, pos)
-    const fn = tag >>> 3
-    const wt = tag & 7
-    if (wt === 0) {
-      const v = Number(readVarintBig(body, pos))
-      if (fn === 1) lian_zhuang = v
-    } else if (wt === 2) {
-      const len = readVarint(body, pos)
-      pos.i += len
-    } else break
-  }
-  return { lian_zhuang }
+  const m = S2C_HzmjLiuJu.decode(body)
+  return { lian_zhuang: m.lian_zhuang }
 }
 
+const PHZ_SMALL = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+const PHZ_BIG = ['壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖', '拾']
 
+/** Paohuzi TileId 0..19 */
+export function phzTileLabel(tile: number): string {
+  if (tile < 0 || tile > 19) return '?'
+  if (tile <= 9) return PHZ_SMALL[tile]!
+  return PHZ_BIG[tile - 10]!
+}
+
+export function phzIsRed(tile: number): boolean {
+  const r = tile % 10
+  return r === 1 || r === 6 || r === 9
+}
+
+export function decodeS2C_PhzGameStart(body: Uint8Array): PhzGameStart {
+  const m = S2C_PhzGameStart.decode(body)
+  return {
+    round_id: m.round_id,
+    room_id: m.room_id,
+    template_id: m.template_id,
+    banker_seat: m.banker_seat,
+    self_hand: [...m.self_hand],
+    wall_remain: m.wall_remain,
+    self_seat: m.self_seat ?? 0,
+    base_score: m.base_score,
+    cfg_snapshot: m.cfg_snapshot,
+  }
+}
+
+export function decodeS2C_PhzTurn(body: Uint8Array): {
+  seat_id: number
+  sub: string
+  timeout_s: number
+  wall_remain: number
+  self_hand: number[]
+  can_hu: boolean
+} {
+  const m = S2C_PhzTurn.decode(body)
+  return {
+    seat_id: m.seat_id ?? 0,
+    sub: m.sub,
+    timeout_s: m.timeout_s,
+    wall_remain: m.wall_remain,
+    self_hand: [...m.self_hand],
+    can_hu: m.can_hu,
+  }
+}
+
+export function decodeS2C_PhzDraw(body: Uint8Array): { seat_id: number; tile: number } {
+  const m = S2C_PhzDraw.decode(body)
+  return { seat_id: m.seat_id, tile: m.tile }
+}
+
+export function decodeS2C_PhzReveal(body: Uint8Array): { seat_id: number; tile: number } {
+  const m = S2C_PhzReveal.decode(body)
+  return { seat_id: m.seat_id ?? 0, tile: m.tile }
+}
+
+export function decodeS2C_PhzDiscardBroadcast(body: Uint8Array): { seat_id: number; tile: number } {
+  const m = S2C_PhzDiscardBroadcast.decode(body)
+  return { seat_id: m.seat_id ?? 0, tile: m.tile }
+}
+
+export function decodeS2C_PhzActionBroadcast(body: Uint8Array): {
+  seat_id: number
+  action: number
+  tile: number
+  tiles: number[]
+  from_seat: number
+  meld_kind: number
+} {
+  const m = S2C_PhzActionBroadcast.decode(body)
+  return {
+    seat_id: m.seat_id,
+    action: m.action,
+    tile: m.tile,
+    tiles: [...m.tiles],
+    from_seat: m.from_seat ?? -1,
+    meld_kind: m.meld_kind,
+  }
+}
+
+export function decodeS2C_PhzSettle(body: Uint8Array): PhzSettle {
+  const m = S2C_PhzSettle.decode(body)
+  return {
+    round_id: m.round_id,
+    winner_seat: m.winner_seat,
+    hu_tile: m.hu_tile,
+    is_draw_win: m.is_draw_win,
+    hu_xi: m.hu_xi,
+    tun: m.tun,
+    fan: m.fan,
+    ming_tang_mask: m.ming_tang_mask,
+    base_score: m.base_score,
+    entries: m.entries.map((e) => ({ uid: e.uid, seat_id: e.seat_id, delta_gold: e.delta_gold })),
+  }
+}
+
+export function decodeS2C_PhzLiuJu(body: Uint8Array): { banker_seat: number } {
+  const m = S2C_PhzLiuJu.decode(body)
+  return { banker_seat: m.banker_seat }
+}

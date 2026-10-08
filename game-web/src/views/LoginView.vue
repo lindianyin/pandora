@@ -70,6 +70,8 @@ function doLogin() {
       <button :disabled="busy || !deviceId.trim()" @click="doLogin">游客登录并连接</button>
       <button @click="checkHealth">检查 /health</button>
       <button class="ghost" @click="$router.push('/hzmj-lab')">麻将四联调试</button>
+      <button class="ghost" @click="$router.push('/ddz-lab')">斗地主三联调试</button>
+      <button class="ghost" @click="$router.push('/phz-lab')">跑胡子三联调试</button>
     </div>
   </section>
 

@@ -26,7 +26,7 @@ void MatchService::TryMatch(int32_t template_id) {
   auto tmpl = lobby_.FindTemplate(template_id);
   if (!tmpl || !tmpl->enabled) return;
   int need = tmpl->players;
-  if (need <= 0) need = (tmpl->game_id == 2) ? 4 : 3;
+  if (need <= 0) need = (tmpl->game_id == 2) ? 4 : 3;  // game_id 1 and 3 are 3p
   if (need < 2) need = 2;
   if (need > 4) need = 4;
 

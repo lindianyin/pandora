@@ -59,6 +59,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
   templates_.clear();
   rake_bp_.clear();
   bool has_hzmj = false;
+  bool has_phz = false;
   for (const auto& row : *rows) {
     proto_wire::LobbyTemplate t;
     t.id = row.Int("id");
@@ -74,6 +75,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     t.enabled = row.Bool("enabled");
     templates_.push_back(t);
     if (t.game_id == 2) has_hzmj = true;
+    if (t.game_id == 3) has_phz = true;
   }
   // Ensure game_id=2 template exists even if DB seed missing (dev/smoke).
   if (!has_hzmj) {
@@ -88,6 +90,19 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     hz.players = 4;
     templates_.push_back(hz);
     rake_bp_[2] = cfg_.rake_bp;
+  }
+  if (!has_phz) {
+    proto_wire::LobbyTemplate phz;
+    phz.id = 3;
+    phz.name = "Paohuzi";
+    phz.base_score = cfg_.base_score;
+    phz.min_gold = cfg_.min_gold;
+    phz.max_gold = cfg_.max_gold;
+    phz.enabled = true;
+    phz.game_id = 3;
+    phz.players = 3;
+    templates_.push_back(phz);
+    rake_bp_[3] = cfg_.rake_bp;
   }
   PLOG_INFO("lobby templates reloaded count=" << templates_.size());
 }
@@ -113,7 +128,7 @@ void LobbyService::UpsertTemplate(int id, const std::string& name, int base_scor
   t.min_gold = min_gold;
   t.max_gold = max_gold;
   t.enabled = enabled;
-  t.game_id = (id == 2) ? 2 : 1;
+  t.game_id = (id == 2) ? 2 : (id == 3) ? 3 : 1;
   t.players = (t.game_id == 2) ? 4 : 3;
   templates_.push_back(t);
 }

@@ -29,8 +29,10 @@ struct GameConfig {
   int match_timeout_s{30};
   int64_t min_gold{0};
   int64_t max_gold{100000000};
-  // 本地调试：固定好牌+三牢，庄家打出「东」即可点炮胡
+  // Local debug: fixed deal + sanlao; banker discards Dong for dianpao
   bool hzmj_debug_deal{false};
+  // Local debug: seat1 ting Yi; banker discards Shi then seat1 zimo Yi
+  bool phz_debug_deal{false};
 };
 
 struct ExchangeConfig {
