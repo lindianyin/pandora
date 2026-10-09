@@ -395,7 +395,7 @@ export function createLabClient(slot: number, deviceId: string) {
   }
 
   function hzmjTemplateId(): number {
-    const t = templates.value.find((x) => x.game_id === 2 && x.enabled)
+    const t = templates.value.find((x) => (x.game_id === 3000 || x.game_id === 2) && x.enabled)
     return t?.id ?? 2
   }
 

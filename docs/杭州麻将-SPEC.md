@@ -24,7 +24,7 @@
 | 人数 | **4**（固定） |
 | 代码落点 | `server/src/game/hzmj/` |
 | 协议 | `proto/game_hzmj.proto` |
-| msg_id 段 | **6000 – 6999** |
+| msg_id 段 | **300000 – 300099** |
 
 首发实现锁定规则文档默认档：`caishen_mode=fixed_bai`（白板固定财神）。`flip` 翻财神作为 P1 扩展开关，接口预留字段，首发可不实现翻牌逻辑。
 
@@ -32,7 +32,7 @@
 
 ```text
 Match / RoomManager
-        │  game_id=2
+        │  game_id=3000
         ▼
    GameRuntime ──注册──► HzmjTable（每桌一实例）
         │
@@ -330,25 +330,25 @@ CanDianpao(shooter, winner):
 
 ---
 
-## 7. 协议（msg_id 6000–6999）
+## 7. 协议（msg_id 300000–300099）
 
 帧格式同主 SPEC：`uint32 LE len | uint32 LE msg_id | protobuf`。
 
 | msg_id | 方向 | message | 说明 |
 |--------|------|---------|------|
-| 6001 | S→C | `S2C_HzmjGameStart` | 开局：座位、庄、连庄、财神、己方手牌、配置快照 |
-| 6002 | S→C | `S2C_HzmjTurn` | 阶段、当前座位、倒计时、牌墙余量、飘状态、`can_zimo`；出牌座位附带权威 `self_hand` |
-| 6003 | S→C | `S2C_HzmjDraw` | 仅摸牌座位收到摸到的牌；他人只收「某座摸牌」 |
-| 6004 | C→S | `C2S_HzmjDiscard` | 出牌；可附带声明暗杠/补杠意图用独立消息 |
-| 6005 | S→C | `S2C_HzmjDiscardBroadcast` | 出牌广播 |
-| 6006 | C→S | `C2S_HzmjAction` | 吃/碰/杠/胡/过（claim 窗内） |
-| 6007 | S→C | `S2C_HzmjActionBroadcast` | 副露/胡结果广播 |
-| 6008 | S→C | `S2C_HzmjGangScore` | 即时杠分（可选） |
-| 6009 | S→C | `S2C_HzmjSettle` | 终局结算 |
-| 6010 | S→C | `S2C_HzmjLiuJu` | 流局 |
-| 6011 | S→C | （未单独实现） | 重连复用 6001 / 6007 / 6005 / 6002，见 §7.2 |
-| 6012 | C→S | `C2S_HzmjGang` | 暗杠/补杠（轮到己方 Discard 阶段） |
-| 6013 | S→C | `S2C_HzmjHint` | 可选：可胡/可碰等提示掩码 |
+| 300001 | S→C | `S2C_HzmjGameStart` | 开局：座位、庄、连庄、财神、己方手牌、配置快照 |
+| 300002 | S→C | `S2C_HzmjTurn` | 阶段、当前座位、倒计时、牌墙余量、飘状态、`can_zimo`；出牌座位附带权威 `self_hand` |
+| 300003 | S→C | `S2C_HzmjDraw` | 仅摸牌座位收到摸到的牌；他人只收「某座摸牌」 |
+| 300005 | C→S | `C2S_HzmjDiscard` | 出牌；可附带声明暗杠/补杠意图用独立消息 |
+| 300006 | S→C | `S2C_HzmjDiscardBroadcast` | 出牌广播 |
+| 300007 | C→S | `C2S_HzmjAction` | 吃/碰/杠/胡/过（claim 窗内） |
+| 300008 | S→C | `S2C_HzmjActionBroadcast` | 副露/胡结果广播 |
+| 300012 | S→C | `S2C_HzmjGangScore` | 即时杠分（可选） |
+| 300009 | S→C | `S2C_HzmjSettle` | 终局结算 |
+| 300010 | S→C | `S2C_HzmjLiuJu` | 流局 |
+| 300013 | S→C | （未单独实现） | 重连复用 6001 / 6007 / 6005 / 6002，见 §7.2 |
+| 300011 | C→S | `C2S_HzmjGang` | 暗杠/补杠（轮到己方 Discard 阶段） |
+| 300014 | S→C | `S2C_HzmjHint` | 可选：可胡/可碰等提示掩码 |
 
 ### 7.1 关键消息字段（逻辑级）
 
@@ -438,7 +438,7 @@ SettlePlan BuildSettle(const HzmjTable&, const HuResult&);
 注册：
 
 ```text
-GameRegistry.Register(game_id=2, factory → HzmjTable)
+GameRegistry.Register(game_id=3000, factory → HzmjTable)
 ```
 
 托管策略（默认）：
@@ -551,6 +551,6 @@ npm test
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| V1.0 | 2026-09-29 | 依据《杭州麻将规则》V1.0 产出：game_id=2、牌编码、配置、状态机、倍数/结算/承包算法、msg_id 6000–6999、模块与验收 |
+| V1.0 | 2026-09-29 | 依据《杭州麻将规则》V1.0 产出：game_id=3000、牌编码、配置、状态机、倍数/结算/承包算法、msg_id 300000–300099、模块与验收 |
 
 **关联**：规则语义 → `docs/杭州麻将规则.md`；平台级约束 → `docs/棋牌游戏服务端-SPEC.md`。

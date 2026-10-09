@@ -256,7 +256,7 @@ export function createDdzLabClient(slot: number, deviceId: string) {
   }
 
   function ddzTemplateId(): number {
-    const t = templates.value.find((x) => x.game_id === 1 && x.enabled)
+    const t = templates.value.find((x) => (x.game_id === 2000 || x.game_id === 1) && x.enabled)
     return t?.id ?? 1
   }
 

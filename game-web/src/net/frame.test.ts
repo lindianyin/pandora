@@ -28,7 +28,7 @@ describe('frame wire', () => {
     const { frames, rest } = tryDecodeFrames(buf)
     expect(rest.length).toBe(0)
     expect(frames).toHaveLength(1)
-    expect(frames[0]!.msgId).toBe(6002)
+    expect(frames[0]!.msgId).toBe(300002)
     expect([...frames[0]!.body]).toEqual([1, 2, 3])
   })
 

@@ -35,10 +35,10 @@ function fieldString(fn: number, s: string): number[] {
 }
 
 describe('phz frame', () => {
-  it('MsgId 7001-7010', () => {
-    expect(MsgId.S2C_PhzGameStart).toBe(7001)
-    expect(MsgId.C2S_PhzDiscard).toBe(7005)
-    expect(MsgId.S2C_PhzLiuJu).toBe(7010)
+  it('MsgId 400001-400010', () => {
+    expect(MsgId.S2C_PhzGameStart).toBe(400001)
+    expect(MsgId.C2S_PhzDiscard).toBe(400005)
+    expect(MsgId.S2C_PhzLiuJu).toBe(400010)
   })
 
   it('phzTileLabel / red', () => {
@@ -55,7 +55,7 @@ describe('phz frame', () => {
     const body = encodeC2S_PhzDiscard(5)
     const frame = new Uint8Array(encodeFrame(MsgId.C2S_PhzDiscard, body))
     const { frames } = tryDecodeFrames(frame)
-    expect(frames[0]!.msgId).toBe(7005)
+    expect(frames[0]!.msgId).toBe(400005)
     const act = encodeC2S_PhzAction(1, [0, 1])
     expect(act.length).toBeGreaterThan(2)
   })

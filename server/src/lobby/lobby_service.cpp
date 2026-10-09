@@ -2,8 +2,24 @@
 
 #include "common/errors.hpp"
 #include "common/log.hpp"
+#include "game/game_ids.hpp"
+#include "game/game_registry.hpp"
 
 namespace pandora {
+
+namespace {
+
+int32_t NormalizeTemplateGameId(int32_t game_id) {
+  if (game_id == 1) return GameId::kDdz;
+  if (game_id == 2) return GameId::kHzmj;
+  if (game_id == 3) return GameId::kPhz;
+  if (game_id < GameId::kMin) return GameId::kDdz;
+  return game_id;
+}
+
+int SeatsFor(int32_t game_id) { return GameRegistry::Instance().DefaultSeats(game_id); }
+
+}  // namespace
 
 LobbyService::LobbyService(SessionHub& hub, MemoryStore& store, GameConfig cfg)
     : hub_(hub), store_(store), cfg_(std::move(cfg)) {
@@ -14,8 +30,8 @@ LobbyService::LobbyService(SessionHub& hub, MemoryStore& store, GameConfig cfg)
   t.min_gold = cfg_.min_gold;
   t.max_gold = cfg_.max_gold;
   t.enabled = true;
-  t.game_id = 1;
-  t.players = 3;
+  t.game_id = GameId::kDdz;
+  t.players = SeatsFor(GameId::kDdz);
   templates_.push_back(t);
   rake_bp_[1] = cfg_.rake_bp;
 
@@ -26,8 +42,8 @@ LobbyService::LobbyService(SessionHub& hub, MemoryStore& store, GameConfig cfg)
   hz.min_gold = cfg_.min_gold;
   hz.max_gold = cfg_.max_gold;
   hz.enabled = true;
-  hz.game_id = 2;
-  hz.players = 4;
+  hz.game_id = GameId::kHzmj;
+  hz.players = SeatsFor(GameId::kHzmj);
   templates_.push_back(hz);
   rake_bp_[2] = cfg_.rake_bp;
 }
@@ -64,9 +80,12 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     proto_wire::LobbyTemplate t;
     t.id = row.Int("id");
     if (t.id <= 0) continue;
-    t.game_id = row.Int("game_id");
-    if (t.game_id <= 0) t.game_id = 1;
-    t.players = (t.game_id == 2) ? 4 : 3;
+    const int32_t raw_gid = row.Int("game_id");
+    t.game_id = NormalizeTemplateGameId(raw_gid);
+    if (t.game_id != raw_gid) {
+      mysql.ExecBind("UPDATE room_template SET game_id=? WHERE id=?", {I64(t.game_id), I64(t.id)});
+    }
+    t.players = SeatsFor(t.game_id);
     t.name = row.Str("name");
     t.base_score = row.Int("base_score");
     rake_bp_[t.id] = row.Int("rake_bp");
@@ -74,10 +93,9 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     t.max_gold = row.I64("max_gold");
     t.enabled = row.Bool("enabled");
     templates_.push_back(t);
-    if (t.game_id == 2) has_hzmj = true;
-    if (t.game_id == 3) has_phz = true;
+    if (t.game_id == GameId::kHzmj) has_hzmj = true;
+    if (t.game_id == GameId::kPhz) has_phz = true;
   }
-  // Ensure game_id=2 template exists even if DB seed missing (dev/smoke).
   if (!has_hzmj) {
     proto_wire::LobbyTemplate hz;
     hz.id = 2;
@@ -86,10 +104,15 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     hz.min_gold = cfg_.min_gold;
     hz.max_gold = cfg_.max_gold;
     hz.enabled = true;
-    hz.game_id = 2;
-    hz.players = 4;
+    hz.game_id = GameId::kHzmj;
+    hz.players = SeatsFor(GameId::kHzmj);
     templates_.push_back(hz);
     rake_bp_[2] = cfg_.rake_bp;
+    mysql.ExecBind(
+        "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) "
+        "VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE game_id=VALUES(game_id)",
+        {I64(2), I64(GameId::kHzmj), Str(hz.name), I64(hz.base_score), I64(cfg_.rake_bp), I64(hz.min_gold),
+         I64(hz.max_gold)});
   }
   if (!has_phz) {
     proto_wire::LobbyTemplate phz;
@@ -99,10 +122,15 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     phz.min_gold = cfg_.min_gold;
     phz.max_gold = cfg_.max_gold;
     phz.enabled = true;
-    phz.game_id = 3;
-    phz.players = 3;
+    phz.game_id = GameId::kPhz;
+    phz.players = SeatsFor(GameId::kPhz);
     templates_.push_back(phz);
     rake_bp_[3] = cfg_.rake_bp;
+    mysql.ExecBind(
+        "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) "
+        "VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE game_id=VALUES(game_id)",
+        {I64(3), I64(GameId::kPhz), Str(phz.name), I64(phz.base_score), I64(cfg_.rake_bp), I64(phz.min_gold),
+         I64(phz.max_gold)});
   }
   PLOG_INFO("lobby templates reloaded count=" << templates_.size());
 }
@@ -128,8 +156,8 @@ void LobbyService::UpsertTemplate(int id, const std::string& name, int base_scor
   t.min_gold = min_gold;
   t.max_gold = max_gold;
   t.enabled = enabled;
-  t.game_id = (id == 2) ? 2 : (id == 3) ? 3 : 1;
-  t.players = (t.game_id == 2) ? 4 : 3;
+  t.game_id = (id == 2) ? GameId::kHzmj : (id == 3) ? GameId::kPhz : GameId::kDdz;
+  t.players = SeatsFor(t.game_id);
   templates_.push_back(t);
 }
 
@@ -140,12 +168,11 @@ void LobbyService::HandleGetLobby(int64_t uid) {
   std::vector<proto_wire::LobbyTemplate> visible;
   {
     std::lock_guard<std::mutex> lk(mu_);
-    for (const auto& t : templates_)
+    for (const auto& t : templates_) {
       if (t.enabled) visible.push_back(t);
+    }
   }
   hub_.Send(uid, MsgId::kS2C_LobbyInfo, proto_wire::EncodeS2C_LobbyInfo(visible, gold, diamond));
-  PLOG_INFO("lobby sent uid=" << uid);
 }
 
 }  // namespace pandora
-

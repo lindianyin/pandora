@@ -587,10 +587,10 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
         if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
         else {
           std::string err;
-          const bool ok = admin.PutTemplate(static_cast<int>(JInt(body, "id", 1)), JStr(body, "name"),
-                                            static_cast<int>(JInt(body, "base_score", 100)),
-                                            static_cast<int>(JInt(body, "rake_bp", 500)), JInt(body, "min_gold"),
-                                            JInt(body, "max_gold"), JBool(body, "enabled", true), *s, &err);
+          const bool ok = admin.PutTemplate(
+              static_cast<int>(JInt(body, "id", 1)), static_cast<int32_t>(JInt(body, "game_id", 0)), JStr(body, "name"),
+              static_cast<int>(JInt(body, "base_score", 100)), static_cast<int>(JInt(body, "rake_bp", 500)),
+              JInt(body, "min_gold"), JInt(body, "max_gold"), JBool(body, "enabled", true), *s, &err);
           if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
           else setJson(200, OkObj({{"ok", true}}, trace));
         }

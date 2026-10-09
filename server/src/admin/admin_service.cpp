@@ -465,6 +465,8 @@ std::string AdminService::ListTemplatesJson() const {
   json items = json::array();
   for (const auto& t : ts) {
     items.push_back({{"id", t.id},
+                     {"game_id", t.game_id},
+                     {"players", t.players},
                      {"name", t.name},
                      {"base_score", t.base_score},
                      {"min_gold", t.min_gold},
@@ -475,18 +477,30 @@ std::string AdminService::ListTemplatesJson() const {
   return json{{"items", std::move(items)}}.dump();
 }
 
-bool AdminService::PutTemplate(int id, const std::string& name, int base_score, int rake_bp, int64_t min_gold,
-                               int64_t max_gold, bool enabled, const AdminSession& admin, std::string* err) {
+bool AdminService::PutTemplate(int id, int32_t game_id, const std::string& name, int base_score, int rake_bp,
+                               int64_t min_gold, int64_t max_gold, bool enabled, const AdminSession& admin,
+                               std::string* err) {
   if (!RequireRole(admin, AdminRole::kOps)) {
     if (err) *err = "forbidden";
     return false;
   }
+  if (game_id <= 0) {
+    if (auto existing = lobby_.FindTemplate(id)) {
+      game_id = existing->game_id;
+    } else {
+      game_id = (id == 2) ? 3000 : (id == 3) ? 4000 : 2000;
+    }
+  }
+  if (game_id == 1) game_id = 2000;
+  if (game_id == 2) game_id = 3000;
+  if (game_id == 3) game_id = 4000;
   const int r = mysql_.ExecBind(
       "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) "
-      "VALUES(?,1,?,?,?,?,?,?) "
-      "ON DUPLICATE KEY UPDATE name=VALUES(name),base_score=VALUES(base_score),rake_bp=VALUES(rake_bp),"
-      "min_gold=VALUES(min_gold),max_gold=VALUES(max_gold),enabled=VALUES(enabled)",
-      {I64(id), Str(name), I64(base_score), I64(rake_bp), I64(min_gold), I64(max_gold), I64(enabled ? 1 : 0)});
+      "VALUES(?,?,?,?,?,?,?,?) "
+      "ON DUPLICATE KEY UPDATE game_id=VALUES(game_id),name=VALUES(name),base_score=VALUES(base_score),"
+      "rake_bp=VALUES(rake_bp),min_gold=VALUES(min_gold),max_gold=VALUES(max_gold),enabled=VALUES(enabled)",
+      {I64(id), I64(game_id), Str(name), I64(base_score), I64(rake_bp), I64(min_gold), I64(max_gold),
+       I64(enabled ? 1 : 0)});
   if (r < 0) {
     if (err) *err = mysql_.LastError();
     return false;

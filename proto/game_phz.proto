@@ -1,7 +1,7 @@
 syntax = "proto3";
 package pandora;
 
-// msg_id = 7001
+// msg_id = 400001
 message S2C_PhzGameStart {
   int64 round_id = 1;
   int64 room_id = 2;
@@ -14,7 +14,7 @@ message S2C_PhzGameStart {
   string cfg_snapshot = 9;  // JSON subset of PhzConfig
 }
 
-// msg_id = 7002
+// msg_id = 400002
 message S2C_PhzTurn {
   optional int32 seat_id = 1;
   string sub = 2;  // discard|claim|draw_judge
@@ -24,36 +24,36 @@ message S2C_PhzTurn {
   bool can_hu = 6;
 }
 
-// msg_id = 7003
+// msg_id = 400003
 message S2C_PhzDraw {
   int32 seat_id = 1;
   int32 tile = 2;  // -1 if not self (pre-reveal)
 }
 
-// msg_id = 7004
+// msg_id = 400004
 message S2C_PhzReveal {
   optional int32 seat_id = 1;
   int32 tile = 2;
 }
 
-// msg_id = 7005
+// msg_id = 400005
 message C2S_PhzDiscard {
   int32 tile = 1;
 }
 
-// msg_id = 7006
+// msg_id = 400006
 message S2C_PhzDiscardBroadcast {
   optional int32 seat_id = 1;
   int32 tile = 2;
 }
 
-// msg_id = 7007
+// msg_id = 400007
 message C2S_PhzAction {
   int32 action = 1;  // 0 pass 1 chi 2 peng 4 hu
   repeated int32 chi_hand_tiles = 2;
 }
 
-// msg_id = 7008
+// msg_id = 400008
 message S2C_PhzActionBroadcast {
   int32 seat_id = 1;
   int32 action = 2;
@@ -63,7 +63,7 @@ message S2C_PhzActionBroadcast {
   int32 meld_kind = 6;  // 1 chi 2 peng 3 wei 4 chou_wei 5 pao 6 ti 7 jiao
 }
 
-// msg_id = 7009
+// msg_id = 400009
 message S2C_PhzSettle {
   message Entry {
     int64 uid = 1;
@@ -82,7 +82,7 @@ message S2C_PhzSettle {
   repeated Entry entries = 10;
 }
 
-// msg_id = 7010
+// msg_id = 400010
 message S2C_PhzLiuJu {
   int32 banker_seat = 1;
 }

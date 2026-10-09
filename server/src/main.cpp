@@ -19,6 +19,7 @@
 #include "common/async_worker.hpp"
 #include "common/config.hpp"
 #include "common/log.hpp"
+#include "game/game_registry.hpp"
 #include "net/game_runtime.hpp"
 #include "net/http_api.hpp"
 #include "net/ws_server.hpp"
@@ -49,6 +50,7 @@ int main(int argc, char** argv) {
   const auto conf_dir = std::filesystem::path(conf_path).parent_path();
   const auto log_file = (conf_dir / ".." / "logs" / "pandora.log").lexically_normal();
   InitLogging(log_file);
+  RegisterBuiltinGames();
   PLOG_INFO("pandora-server Beast stack starting, config=" << conf_path);
 
   MysqlClient mysql(cfg.mysql.dsn, cfg.mysql.pool_size);

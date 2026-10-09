@@ -69,7 +69,7 @@ onMounted(() => {
       <div>
         <strong>{{ t.name }}</strong>
         <span class="meta">
-          {{ t.game_id === 2 ? '杭州麻将' : t.game_id === 3 ? '跑胡子' : '斗地主' }} · {{ t.players || (t.game_id === 2 ? 4 : 3) }}人
+          {{ t.game_id === 3000 || t.game_id === 2 ? '杭州麻将' : t.game_id === 4000 || t.game_id === 3 ? '跑胡子' : '斗地主' }} · {{ t.players || (t.game_id === 3000 || t.game_id === 2 ? 4 : 3) }}人
           · 底分 {{ t.base_score }} · 金币 [{{ t.min_gold }}, {{ t.max_gold }}]
         </span>
         <span v-if="!t.enabled" class="off">已关闭</span>

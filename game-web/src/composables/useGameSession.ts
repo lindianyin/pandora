@@ -143,14 +143,14 @@ function clearErrorSoon() {
 function resolveGameId(templateId: number): number {
   const t = templates.value.find((x) => x.id === templateId)
   if (t?.game_id) return t.game_id
-  if (templateId === 2) return 2
-  if (templateId === 3) return 3
-  return 1
+  if (templateId === 2) return 3000
+  if (templateId === 3) return 4000
+  return 2000
 }
 
 function tablePathForGame(gameId: number) {
-  if (gameId === 2) return '/hzmj-table'
-  if (gameId === 3) return '/phz-table'
+  if (gameId === 3000 || gameId === 2) return '/hzmj-table'
+  if (gameId === 4000 || gameId === 3) return '/phz-table'
   return '/table'
 }
 

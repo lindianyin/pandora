@@ -53,19 +53,29 @@ async function main() {
   const put = await api('/admin/v1/rooms/templates', {
     method: 'PUT',
     token,
-    body: { id: 1, name: '初级场', base_score: 110, rake_bp: 500, min_gold: 1000, max_gold: 0, enabled: true },
+    body: {
+      id: 1,
+      game_id: 2000,
+      name: '初级场',
+      base_score: 110,
+      rake_bp: 500,
+      min_gold: 1000,
+      max_gold: 0,
+      enabled: true,
+    },
   })
   assert(put.code === 0, 'put template')
 
   const tpls = await api('/admin/v1/rooms/templates', { token })
-  assert(tpls.code === 0 && tpls.data.items?.some((t) => t.base_score === 110), 'template hot')
+  const t1 = tpls.data.items?.find((t) => t.id === 1)
+  assert(tpls.code === 0 && t1?.base_score === 110 && t1?.game_id === 2000, 'template hot')
 
   const audit = await api('/admin/v1/audit', { token })
   assert(audit.code === 0 && audit.data.items?.length > 0, 'audit')
 
   // player token forbidden on admin
   const denied = await api('/admin/v1/dashboard', { token: guest.data.access_token })
-  assert(denied.code === 1002, 'player token denied')
+  assert(denied.code === 10002, 'player token denied')
 
   console.log('ALL ADMIN SMOKE PASS')
 }

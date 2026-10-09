@@ -380,7 +380,7 @@ export function createPhzLabClient(slot: number, deviceId: string) {
   }
 
   function phzTemplateId(): number {
-    const t = templates.value.find((x) => x.game_id === 3 && x.enabled)
+    const t = templates.value.find((x) => (x.game_id === 4000 || x.game_id === 3) && x.enabled)
     return t?.id ?? 3
   }
 

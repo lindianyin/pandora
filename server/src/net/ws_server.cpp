@@ -112,35 +112,38 @@ class WsSessionBase : public ISessionConn {
     if (!authed_) {
       if (frame.msg_id != MsgId::kC2S_Auth) {
         Send(MsgId::kS2C_Error,
-             proto_wire::EncodeS2C_Error(static_cast<int>(Err::kUnauthorized), "auth required", frame.msg_id));
+             proto_wire::EncodeS2C_Error(static_cast<int>(Err::kUnauthorized), ErrMessage(Err::kUnauthorized),
+                                        frame.msg_id));
         return false;
       }
       std::string token;
       if (!proto_wire::DecodeC2S_Auth(frame.body.data(), frame.body.size(), token)) {
-        Send(MsgId::kS2C_AuthResult, proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kBadParam), "bad auth", 0));
+        Send(MsgId::kS2C_AuthResult,
+             proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kBadParam), ErrMessage(Err::kBadParam), 0));
         return false;
       }
       auto sess = auth_.ValidateToken(token);
       if (!sess) {
         Send(MsgId::kS2C_AuthResult,
-             proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kUnauthorized), "invalid token", 0));
+             proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kUnauthorized), ErrMessage(Err::kUnauthorized), 0));
         return false;
       }
       if (admin_) {
         if (admin_->IsMaintain()) {
           Send(MsgId::kS2C_AuthResult,
-               proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kMaintain), "maintain", 0));
+               proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kMaintain), ErrMessage(Err::kMaintain), 0));
           return false;
         }
         if (admin_->IsBanned(sess->uid)) {
-          Send(MsgId::kS2C_AuthResult, proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kBanned), "banned", 0));
+          Send(MsgId::kS2C_AuthResult,
+               proto_wire::EncodeS2C_AuthResult(static_cast<int>(Err::kBanned), ErrMessage(Err::kBanned), 0));
           return false;
         }
       }
       authed_ = true;
       uid_ = sess->uid;
       runtime_.hub.Bind(uid_, self().Shared());
-      Send(MsgId::kS2C_AuthResult, proto_wire::EncodeS2C_AuthResult(0, "ok", uid_));
+      Send(MsgId::kS2C_AuthResult, proto_wire::EncodeS2C_AuthResult(0, ErrMessage(Err::kOk), uid_));
       runtime_.OnReconnect(uid_);
       PLOG_INFO("ws auth ok uid=" << uid_);
       return true;

@@ -81,8 +81,8 @@ class AdminService {
   std::string ListLedgersJson(int64_t uid, int page, int page_size) const;
   std::string ListRoundsJson(int64_t uid, int page, int page_size) const;
   std::string ListTemplatesJson() const;
-  bool PutTemplate(int id, const std::string& name, int base_score, int rake_bp, int64_t min_gold, int64_t max_gold,
-                   bool enabled, const AdminSession& admin, std::string* err);
+  bool PutTemplate(int id, int32_t game_id, const std::string& name, int base_score, int rake_bp, int64_t min_gold,
+                   int64_t max_gold, bool enabled, const AdminSession& admin, std::string* err);
   std::string ListProductsJson() const;
   bool UpsertProduct(int id, int amount_fen, int diamond, int gift, const std::string& gift_items_json, bool enabled,
                      const AdminSession& admin, std::string* err);
@@ -98,7 +98,7 @@ class AdminService {
   std::string ExportClaimsCsv(int limit) const;
 
   void RecordRound(int64_t round_id, int64_t room_id, int template_id, const std::string& players_json, int base_score,
-                   int multiplier, int game_id = 1);
+                   int multiplier, int game_id = 2000);
 
   void Audit(int admin_id, const std::string& action, const std::string& target, const std::string& before,
              const std::string& after);

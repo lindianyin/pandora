@@ -1,7 +1,7 @@
 syntax = "proto3";
 package pandora;
 
-// msg_id = 6001
+// msg_id = 300001
 message S2C_HzmjGameStart {
   int64 round_id = 1;
   int64 room_id = 2;
@@ -16,7 +16,7 @@ message S2C_HzmjGameStart {
   int32 base_score = 11;
 }
 
-// msg_id = 6002
+// msg_id = 300002
 message S2C_HzmjTurn {
   optional int32 seat_id = 1;  // optional so seat 0 is present on wire
   string sub = 2;  // discard|claim|piao
@@ -27,30 +27,30 @@ message S2C_HzmjTurn {
   bool can_zimo = 7;  // 本回合可自摸：摸牌后或庄家起手；吃碰后为 false
 }
 
-// msg_id = 6003
+// msg_id = 300003
 message S2C_HzmjDraw {
   int32 seat_id = 1;
   int32 tile = 2;  // -1 if not self
 }
 
-// msg_id = 6004
+// msg_id = 300005
 message C2S_HzmjDiscard {
   int32 tile = 1;
 }
 
-// msg_id = 6005
+// msg_id = 300006
 message S2C_HzmjDiscardBroadcast {
   optional int32 seat_id = 1;
   int32 tile = 2;
 }
 
-// msg_id = 6006
+// msg_id = 300007
 message C2S_HzmjAction {
   int32 action = 1;  // 0 pass 1 chi 2 peng 3 gang 4 hu
   repeated int32 chi_hand_tiles = 2;
 }
 
-// msg_id = 6007
+// msg_id = 300008
 message S2C_HzmjActionBroadcast {
   int32 seat_id = 1;
   int32 action = 2;  // 1 chi 2 peng 3 gang(明/暗/补)
@@ -60,7 +60,7 @@ message S2C_HzmjActionBroadcast {
   int32 meld_kind = 6;  // 1 chi 2 peng 3 ming_gang 4 an_gang 5 bu_gang；0=兼容旧包
 }
 
-// msg_id = 6009
+// msg_id = 300009
 message S2C_HzmjSettle {
   message Entry {
     int64 uid = 1;
@@ -79,12 +79,12 @@ message S2C_HzmjSettle {
   repeated Entry entries = 10;
 }
 
-// msg_id = 6010
+// msg_id = 300010
 message S2C_HzmjLiuJu {
   int32 lian_zhuang = 1;
 }
 
-// msg_id = 6012
+// msg_id = 300011
 message C2S_HzmjGang {
   int32 kind = 1;  // 0 an 1 bu
   int32 tile = 2;

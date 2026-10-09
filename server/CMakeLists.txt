@@ -87,6 +87,10 @@ add_executable(pandora-server
   src/lobby/lobby_service.cpp
   src/match/match_service.cpp
   src/room/room_manager.cpp
+  src/game/game_registry.cpp
+  src/game/ddz/ddz_room_game.cpp
+  src/game/hzmj/hzmj_room_game.cpp
+  src/game/phz/phz_room_game.cpp
   src/game/ddz_cards.cpp
   src/game/hzmj/tiles.cpp
   src/game/hzmj/meld.cpp

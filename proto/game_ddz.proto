@@ -1,7 +1,7 @@
 syntax = "proto3";
 package pandora;
 
-// msg_id = 2001
+// msg_id = 200001
 message S2C_DdzGameStart {
   int32 seat_id = 1;
   repeated int32 hand_cards = 2;
@@ -10,31 +10,31 @@ message S2C_DdzGameStart {
   int64 round_id = 5;
 }
 
-// msg_id = 2002
+// msg_id = 200002
 message S2C_DdzTurn {
   int32 seat_id = 1;
   string phase = 2;
   int32 timeout_s = 3;
 }
 
-// msg_id = 2003
+// msg_id = 200003
 message C2S_DdzBid {
   int32 score = 1;
 }
 
-// msg_id = 2004
+// msg_id = 200004
 message S2C_DdzBidBroadcast {
   int32 seat_id = 1;
   int32 score = 2;
 }
 
-// msg_id = 2005
+// msg_id = 200005
 message C2S_DdzPlay {
   bool pass = 1;
   repeated int32 cards = 2;
 }
 
-// msg_id = 2006
+// msg_id = 200006
 message S2C_DdzPlayBroadcast {
   int32 seat_id = 1;
   bool pass = 2;
@@ -42,7 +42,7 @@ message S2C_DdzPlayBroadcast {
   int32 cards_left = 4;
 }
 
-// msg_id = 2007
+// msg_id = 200007
 message S2C_DdzSettle {
   message Entry {
     int64 uid = 1;
@@ -55,7 +55,7 @@ message S2C_DdzSettle {
   repeated Entry entries = 4;
 }
 
-// msg_id = 2008
+// msg_id = 200008
 message S2C_DdzReconnect {
   int32 seat_id = 1;
   string phase = 2;

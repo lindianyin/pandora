@@ -21,8 +21,8 @@ proto/                # 唯一协议契约（.proto）
 server/               # C++ pandora-server（MSVC / CMake）
   src/net/            # HTTP、WSS、帧、SessionHub、IOCP
   src/auth/ lobby/ match/ room/ game/
-  src/game/hzmj/      # 杭州麻将牌桌、胡牌、计分
-  src/game/phz/       # 跑胡子牌桌、偎跑提、囤番
+  src/game/           # GameRegistry + IRoomGame；game_id 2000/3000/4000
+  src/game/ddz|hzmj|phz/  # 规则 Table + *_room_game 适配器
   src/wallet/ pay/ activity/ admin/ social/ bag/
   src/store/          # MysqlClient、RedisClient、MemoryStore
   conf/               # server.json / server.tls.json
@@ -33,6 +33,8 @@ game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab
 admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
 docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```
+
+玩法扩展：`msg_id = game_id * 100 + slot`（`game_id` 四位，1000–9999）；新玩法实现 `IRoomGame` 并在 `RegisterBuiltinGames` 注册，勿再往 `Room` 加平行字段。错误码与文案见 `errors.hpp`（`ErrMessage` / `SendError`）。
 
 命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`。对局轨迹用 `LogRound`（`server/src/common/log.hpp`），行格式：
 

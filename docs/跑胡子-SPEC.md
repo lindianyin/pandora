@@ -24,7 +24,7 @@
 | 人数 | **3**（固定） |
 | 代码落点 | `server/src/game/phz/`（规划） |
 | 协议 | `proto/game_phz.proto`（规划） |
-| msg_id 段 | **7000 – 7999** |
+| msg_id 段 | **400000 – 400099** |
 
 首发实现锁定规则文档默认档：三人、80 张、`min_hu_xi=15`、`dian_pao=false`、偎 / 跑 / 提强制、囤数 `floor((xi-15)/3)+1`、自摸 `zimo_mode=tun_plus_1`。
 
@@ -32,7 +32,7 @@
 
 ```text
 Match / RoomManager
-        │  game_id=3
+        │  game_id=4000
         ▼
    GameRuntime ──注册──► PhzTable（每桌一实例）
         │
@@ -346,22 +346,22 @@ CanPao(seat, tile, source):
 
 ---
 
-## 7. 协议（msg_id 7000–7999）
+## 7. 协议（msg_id 400000–400099）
 
 帧格式同主 SPEC：`uint32 LE len | uint32 LE msg_id | protobuf`。
 
 | msg_id | 方向 | message | 说明 |
 |--------|------|---------|------|
-| 7001 | S→C | `S2C_PhzGameStart` | 开局：座位、庄、己方手牌、墩余量、配置快照 |
-| 7002 | S→C | `S2C_PhzTurn` | 阶段、当前座位、倒计时、墩余量；出牌座位附带权威 `self_hand`；`claim` 仅推给有牌权座位 + 出牌/示众源座位；`can_hu` 按收件人计算 |
-| 7003 | S→C | `S2C_PhzDraw` | 摸牌：摸牌者见 `tile`；他人 `tile=-1` 或仅知座位（示众前） |
-| 7004 | S→C | `S2C_PhzReveal` | 摸牌示众：全桌可见 `seat,tile` |
-| 7005 | C→S | `C2S_PhzDiscard` | 出牌 |
-| 7006 | S→C | `S2C_PhzDiscardBroadcast` | 出牌广播 |
-| 7007 | C→S | `C2S_PhzAction` | 吃/碰/过/胡（跑偎提默认服务器强制，仍可回执） |
-| 7008 | S→C | `S2C_PhzActionBroadcast` | 门前变化：吃碰偎跑提 |
-| 7009 | S→C | `S2C_PhzSettle` | 终局结算 |
-| 7010 | S→C | `S2C_PhzLiuJu` | 流局 |
+| 400001 | S→C | `S2C_PhzGameStart` | 开局：座位、庄、己方手牌、墩余量、配置快照 |
+| 400002 | S→C | `S2C_PhzTurn` | 阶段、当前座位、倒计时、墩余量；出牌座位附带权威 `self_hand`；`claim` 仅推给有牌权座位 + 出牌/示众源座位；`can_hu` 按收件人计算 |
+| 400003 | S→C | `S2C_PhzDraw` | 摸牌：摸牌者见 `tile`；他人 `tile=-1` 或仅知座位（示众前） |
+| 400004 | S→C | `S2C_PhzReveal` | 摸牌示众：全桌可见 `seat,tile` |
+| 400005 | C→S | `C2S_PhzDiscard` | 出牌 |
+| 400006 | S→C | `S2C_PhzDiscardBroadcast` | 出牌广播 |
+| 400007 | C→S | `C2S_PhzAction` | 吃/碰/过/胡（跑偎提默认服务器强制，仍可回执） |
+| 400008 | S→C | `S2C_PhzActionBroadcast` | 门前变化：吃碰偎跑提 |
+| 400009 | S→C | `S2C_PhzSettle` | 终局结算 |
+| 400010 | S→C | `S2C_PhzLiuJu` | 流局 |
 | 7011 | S→C | （可选）`S2C_PhzReconnect` | 首发可复用 7001/7008/7006/7004/7002 快照重放 |
 | 7012 | S→C | `S2C_PhzHint` | 可选：可吃/碰/胡掩码与吃牌候选 |
 
@@ -466,7 +466,7 @@ SettlePlan BuildSettle(const PhzTable&, const HuResult&);
 注册：
 
 ```text
-GameRegistry.Register(game_id=3, factory → PhzTable)
+GameRegistry.Register(game_id=4000, factory → PhzTable)
 ```
 
 托管策略（默认）：
@@ -561,7 +561,7 @@ Redis：无新增必选键。
 ```text
 改 docs/跑胡子规则.md
   → 改本 SPEC
-  → 主 SPEC 登记 game_id=3 / msg 7000–7999（若尚未登记）
+  → 主 SPEC 登记 game_id=4000 / msg 400000–400099（若尚未登记）
   → proto/game_phz.proto
   → server/src/game/phz/
   → game-web 桌面与 /phz-lab

@@ -6,6 +6,8 @@
 #include "common/errors.hpp"
 #include "common/log.hpp"
 #include "common/proto_wire.hpp"
+#include "common/send_error.hpp"
+#include "game/game_registry.hpp"
 
 namespace pandora {
 
@@ -26,7 +28,7 @@ void MatchService::TryMatch(int32_t template_id) {
   auto tmpl = lobby_.FindTemplate(template_id);
   if (!tmpl || !tmpl->enabled) return;
   int need = tmpl->players;
-  if (need <= 0) need = (tmpl->game_id == 2) ? 4 : 3;  // game_id 1 and 3 are 3p
+  if (need <= 0) need = GameRegistry::Instance().DefaultSeats(tmpl->game_id);
   if (need < 2) need = 2;
   if (need > 4) need = 4;
 
@@ -50,9 +52,7 @@ void MatchService::TryMatch(int32_t template_id) {
 void MatchService::QuickMatch(int64_t uid, int32_t template_id) {
   std::lock_guard<std::mutex> lk(mu_);
   if (rooms_.RoomOf(uid)) {
-    hub_.Send(uid, MsgId::kS2C_Error,
-              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kBadParam), "already in room",
-                                          MsgId::kC2S_QuickMatch));
+    SendError(hub_, uid, Err::kAlreadyInRoom, MsgId::kC2S_QuickMatch);
     return;
   }
   if (uid_in_queue_.count(uid)) {
@@ -61,22 +61,16 @@ void MatchService::QuickMatch(int64_t uid, int32_t template_id) {
   }
   const auto tmpl = lobby_.FindTemplate(template_id);
   if (!tmpl || !tmpl->enabled) {
-    hub_.Send(uid, MsgId::kS2C_Error,
-              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kNotFound), "template not found",
-                                          MsgId::kC2S_QuickMatch));
+    SendError(hub_, uid, Err::kTemplateNotFound, MsgId::kC2S_QuickMatch);
     return;
   }
   auto p = store_.GetPlayer(uid);
   if (!p) {
-    hub_.Send(uid, MsgId::kS2C_Error,
-              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kNotFound), "player not found",
-                                          MsgId::kC2S_QuickMatch));
+    SendError(hub_, uid, Err::kPlayerNotFound, MsgId::kC2S_QuickMatch);
     return;
   }
   if (p->gold < tmpl->min_gold || (tmpl->max_gold > 0 && p->gold > tmpl->max_gold)) {
-    hub_.Send(uid, MsgId::kS2C_Error,
-              proto_wire::EncodeS2C_Error(static_cast<int>(Err::kForbidden), "gold out of range",
-                                          MsgId::kC2S_QuickMatch));
+    SendError(hub_, uid, Err::kGoldOutOfRange, MsgId::kC2S_QuickMatch);
     return;
   }
 
