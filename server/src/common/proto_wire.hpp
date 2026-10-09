@@ -119,5 +119,65 @@ std::vector<uint8_t> EncodeS2C_PhzSettle(int64_t round_id, int32_t winner_seat, 
                                          int32_t base_score, const std::vector<SettleEntry>& entries);
 std::vector<uint8_t> EncodeS2C_PhzLiuJu(int32_t banker_seat);
 
+struct FishSeatData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  std::string nickname;
+  int32_t cannon_mult{1};
+  bool online{true};
+  int64_t gold{0};
+};
+
+struct FishSnapData {
+  int64_t fish_id{0};
+  int32_t type_id{0};
+  float x{0};
+  float y{0};
+  float vx{0};
+  float vy{0};
+  float radius{0};
+  int32_t hp{0};
+  int32_t hp_max{0};
+};
+
+struct FishGameStartData {
+  int64_t round_id{0};
+  int64_t room_id{0};
+  int32_t template_id{0};
+  int32_t self_seat{0};
+  int32_t base_score{100};
+  std::vector<int32_t> cannon_mults;
+  std::vector<FishSeatData> seats;
+  std::vector<FishSnapData> fish;
+  std::string cfg_snapshot;
+};
+
+struct FishFireBroadcastData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  int64_t bullet_id{0};
+  int32_t mult{0};
+  float x{0};
+  float y{0};
+  float vx{0};
+  float vy{0};
+  int64_t client_seq{0};
+  int64_t gold{0};
+  int64_t cost{0};
+};
+
+bool DecodeC2S_FishFire(const uint8_t* data, size_t len, int32_t& mult, float& aim_x, float& aim_y,
+                        int64_t& lock_fish_id, int64_t& client_seq);
+bool DecodeC2S_FishSetMult(const uint8_t* data, size_t len, int32_t& mult);
+
+std::vector<uint8_t> EncodeS2C_FishGameStart(const FishGameStartData& data);
+std::vector<uint8_t> EncodeS2C_FishSeatUpdate(const FishSeatData& seat);
+std::vector<uint8_t> EncodeS2C_FishSpawn(const std::vector<FishSnapData>& fish);
+std::vector<uint8_t> EncodeS2C_FishDespawn(const std::vector<int64_t>& fish_ids, const std::string& reason);
+std::vector<uint8_t> EncodeS2C_FishFireBroadcast(const FishFireBroadcastData& data);
+std::vector<uint8_t> EncodeS2C_FishHit(int64_t bullet_id, int64_t fish_id, int32_t seat_id, int32_t hp, int32_t hp_max);
+std::vector<uint8_t> EncodeS2C_FishCatch(int64_t fish_id, int32_t type_id, int32_t seat_id, int64_t uid, int64_t reward,
+                                         int64_t gold);
+
 }  // namespace proto_wire
 }  // namespace pandora

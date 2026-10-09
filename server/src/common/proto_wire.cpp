@@ -5,6 +5,7 @@
 #include <common.pb.h>
 #include <game_ddz.pb.h>
 #include <game_hzmj.pb.h>
+#include <game_fish.pb.h>
 #include <game_phz.pb.h>
 #include <lobby.pb.h>
 #include <social.pb.h>
@@ -481,6 +482,121 @@ std::vector<uint8_t> EncodeS2C_PhzSettle(int64_t round_id, int32_t winner_seat, 
 std::vector<uint8_t> EncodeS2C_PhzLiuJu(int32_t banker_seat) {
   S2C_PhzLiuJu m;
   m.set_banker_seat(banker_seat);
+  return Serialize(m);
+}
+
+namespace {
+
+void FillFishSeat(FishSeatInfo* out, const FishSeatData& s) {
+  out->set_seat_id(s.seat_id);
+  out->set_uid(s.uid);
+  out->set_nickname(s.nickname);
+  out->set_cannon_mult(s.cannon_mult);
+  out->set_online(s.online);
+  out->set_gold(s.gold);
+}
+
+void FillFishSnap(FishSnapshot* out, const FishSnapData& f) {
+  out->set_fish_id(f.fish_id);
+  out->set_type_id(f.type_id);
+  out->set_x(f.x);
+  out->set_y(f.y);
+  out->set_vx(f.vx);
+  out->set_vy(f.vy);
+  out->set_radius(f.radius);
+  out->set_hp(f.hp);
+  out->set_hp_max(f.hp_max);
+}
+
+}  // namespace
+
+bool DecodeC2S_FishFire(const uint8_t* data, size_t len, int32_t& mult, float& aim_x, float& aim_y,
+                        int64_t& lock_fish_id, int64_t& client_seq) {
+  C2S_FishFire m;
+  if (!Parse(data, len, m)) return false;
+  mult = m.mult();
+  aim_x = m.aim_x();
+  aim_y = m.aim_y();
+  lock_fish_id = m.lock_fish_id();
+  client_seq = m.client_seq();
+  return true;
+}
+
+bool DecodeC2S_FishSetMult(const uint8_t* data, size_t len, int32_t& mult) {
+  C2S_FishSetMult m;
+  if (!Parse(data, len, m)) return false;
+  mult = m.mult();
+  return true;
+}
+
+std::vector<uint8_t> EncodeS2C_FishGameStart(const FishGameStartData& data) {
+  S2C_FishGameStart m;
+  m.set_round_id(data.round_id);
+  m.set_room_id(data.room_id);
+  m.set_template_id(data.template_id);
+  m.set_self_seat(data.self_seat);
+  m.set_base_score(data.base_score);
+  for (auto v : data.cannon_mults) m.add_cannon_mults(v);
+  for (const auto& s : data.seats) FillFishSeat(m.add_seats(), s);
+  for (const auto& f : data.fish) FillFishSnap(m.add_fish(), f);
+  m.set_cfg_snapshot(data.cfg_snapshot);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishSeatUpdate(const FishSeatData& seat) {
+  S2C_FishSeatUpdate m;
+  FillFishSeat(m.mutable_seat(), seat);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishSpawn(const std::vector<FishSnapData>& fish) {
+  S2C_FishSpawn m;
+  for (const auto& f : fish) FillFishSnap(m.add_fish(), f);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishDespawn(const std::vector<int64_t>& fish_ids, const std::string& reason) {
+  S2C_FishDespawn m;
+  for (auto id : fish_ids) m.add_fish_ids(id);
+  m.set_reason(reason);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishFireBroadcast(const FishFireBroadcastData& data) {
+  S2C_FishFireBroadcast m;
+  m.set_seat_id(data.seat_id);
+  m.set_uid(data.uid);
+  m.set_bullet_id(data.bullet_id);
+  m.set_mult(data.mult);
+  m.set_x(data.x);
+  m.set_y(data.y);
+  m.set_vx(data.vx);
+  m.set_vy(data.vy);
+  m.set_client_seq(data.client_seq);
+  m.set_gold(data.gold);
+  m.set_cost(data.cost);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishHit(int64_t bullet_id, int64_t fish_id, int32_t seat_id, int32_t hp, int32_t hp_max) {
+  S2C_FishHit m;
+  m.set_bullet_id(bullet_id);
+  m.set_fish_id(fish_id);
+  m.set_seat_id(seat_id);
+  m.set_hp(hp);
+  m.set_hp_max(hp_max);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_FishCatch(int64_t fish_id, int32_t type_id, int32_t seat_id, int64_t uid, int64_t reward,
+                                         int64_t gold) {
+  S2C_FishCatch m;
+  m.set_fish_id(fish_id);
+  m.set_type_id(type_id);
+  m.set_seat_id(seat_id);
+  m.set_uid(uid);
+  m.set_reward(reward);
+  m.set_gold(gold);
   return Serialize(m);
 }
 

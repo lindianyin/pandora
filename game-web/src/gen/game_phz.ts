@@ -7,7 +7,7 @@
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
-/** msg_id = 7001 */
+/** msg_id = 400001 */
 export interface S2C_PhzGameStart {
   round_id: number;
   room_id: number;
@@ -21,7 +21,7 @@ export interface S2C_PhzGameStart {
   cfg_snapshot: string;
 }
 
-/** msg_id = 7002 */
+/** msg_id = 400002 */
 export interface S2C_PhzTurn {
   seat_id?:
     | number
@@ -34,38 +34,38 @@ export interface S2C_PhzTurn {
   can_hu: boolean;
 }
 
-/** msg_id = 7003 */
+/** msg_id = 400003 */
 export interface S2C_PhzDraw {
   seat_id: number;
   /** -1 if not self (pre-reveal) */
   tile: number;
 }
 
-/** msg_id = 7004 */
+/** msg_id = 400004 */
 export interface S2C_PhzReveal {
   seat_id?: number | undefined;
   tile: number;
 }
 
-/** msg_id = 7005 */
+/** msg_id = 400005 */
 export interface C2S_PhzDiscard {
   tile: number;
 }
 
-/** msg_id = 7006 */
+/** msg_id = 400006 */
 export interface S2C_PhzDiscardBroadcast {
   seat_id?: number | undefined;
   tile: number;
 }
 
-/** msg_id = 7007 */
+/** msg_id = 400007 */
 export interface C2S_PhzAction {
   /** 0 pass 1 chi 2 peng 4 hu */
   action: number;
   chi_hand_tiles: number[];
 }
 
-/** msg_id = 7008 */
+/** msg_id = 400008 */
 export interface S2C_PhzActionBroadcast {
   seat_id: number;
   action: number;
@@ -78,7 +78,7 @@ export interface S2C_PhzActionBroadcast {
   meld_kind: number;
 }
 
-/** msg_id = 7009 */
+/** msg_id = 400009 */
 export interface S2C_PhzSettle {
   round_id: number;
   winner_seat: number;
@@ -98,7 +98,7 @@ export interface S2C_PhzSettle_Entry {
   delta_gold: number;
 }
 
-/** msg_id = 7010 */
+/** msg_id = 400010 */
 export interface S2C_PhzLiuJu {
   banker_seat: number;
 }

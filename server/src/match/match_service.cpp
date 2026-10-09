@@ -7,6 +7,7 @@
 #include "common/log.hpp"
 #include "common/proto_wire.hpp"
 #include "common/send_error.hpp"
+#include "game/game_ids.hpp"
 #include "game/game_registry.hpp"
 
 namespace pandora {
@@ -29,6 +30,10 @@ void MatchService::TryMatch(int32_t template_id) {
   if (!tmpl || !tmpl->enabled) return;
   int need = tmpl->players;
   if (need <= 0) need = GameRegistry::Instance().DefaultSeats(tmpl->game_id);
+  if (tmpl->game_id == GameId::kFish) {
+    // Fish matching is driven by Tick (grace window for lab multi-seat).
+    return;
+  }
   if (need < 2) need = 2;
   if (need > 4) need = 4;
 
@@ -114,6 +119,33 @@ void MatchService::Tick() {
   }
   for (int64_t uid : timed_out) {
     hub_.Send(uid, MsgId::kS2C_MatchStatus, proto_wire::EncodeS2C_MatchStatus(2, 0, "timeout"));
+  }
+
+  // Fish: short grace so lab dual can share a table; then match min(queue,4) with solo allowed.
+  constexpr auto kFishGrace = std::chrono::milliseconds(400);
+  for (auto& kv : queues_) {
+    const int32_t tid = kv.first;
+    auto tmpl = lobby_.FindTemplate(tid);
+    if (!tmpl || tmpl->game_id != GameId::kFish) continue;
+    auto& q = kv.second;
+    if (q.empty()) continue;
+    const auto oldest = q.front().enqueue_at;
+    if (now - oldest < kFishGrace && static_cast<int>(q.size()) < 2) continue;
+    const int need = std::min(4, std::max(1, static_cast<int>(q.size())));
+    while (static_cast<int>(q.size()) >= need && need >= 1) {
+      std::vector<int64_t> uids;
+      uids.reserve(static_cast<size_t>(need));
+      for (int i = 0; i < need; ++i) uids.push_back(q[static_cast<size_t>(i)].uid);
+      q.erase(q.begin(), q.begin() + need);
+      for (int64_t u : uids) uid_in_queue_.erase(u);
+      const int64_t room_id = rooms_.CreateRoom(tid, uids, tmpl->game_id);
+      for (int64_t u : uids) {
+        hub_.Send(u, MsgId::kS2C_MatchStatus, proto_wire::EncodeS2C_MatchStatus(1, room_id, "matched"));
+      }
+      rooms_.PushRoomState(room_id);
+      PLOG_INFO("matched room=" << room_id << " game_id=" << tmpl->game_id << " players=" << need);
+      if (q.empty()) break;
+    }
   }
 }
 

@@ -51,6 +51,16 @@ export async function exchangeDiamond(token: string, diamond: number, clientOrde
   return (await res.json()) as ApiResult<{ gold: number; diamond?: number }>
 }
 
+/** Lab/dev: grant gold for fish testing (server caps amount). */
+export async function labTopupGold(token: string, amount = 100000) {
+  const res = await fetch(`${API_BASE}/api/v1/wallet/lab_topup`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ amount }),
+  })
+  return (await res.json()) as ApiResult<{ gold: number; added: number }>
+}
+
 export type PayProduct = {
   id: number
   amount_fen: number

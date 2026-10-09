@@ -154,12 +154,14 @@ function resolveGameId(templateId: number): number {
   if (t?.game_id) return t.game_id
   if (templateId === 2) return 3000
   if (templateId === 3) return 4000
+  if (templateId === 4) return 5000
   return 2000
 }
 
 function tablePathForGame(gameId: number) {
   if (gameId === 3000 || gameId === 2) return '/hzmj-table'
   if (gameId === 4000 || gameId === 3) return '/phz-table'
+  if (gameId === 5000 || gameId === 4) return '/fish'
   return '/table'
 }
 

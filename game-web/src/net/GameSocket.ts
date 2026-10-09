@@ -16,6 +16,9 @@ import {
   encodeC2S_HzmjGang,
   encodeC2S_PhzDiscard,
   encodeC2S_PhzAction,
+  encodeC2S_FishFire,
+  encodeC2S_FishSetMult,
+  encodeC2S_FishLeave,
   encodeC2S_ClientTrace,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
@@ -42,6 +45,13 @@ import {
   decodeS2C_PhzActionBroadcast,
   decodeS2C_PhzSettle,
   decodeS2C_PhzLiuJu,
+  decodeS2C_FishGameStart,
+  decodeS2C_FishSeatUpdate,
+  decodeS2C_FishSpawn,
+  decodeS2C_FishDespawn,
+  decodeS2C_FishFireBroadcast,
+  decodeS2C_FishHit,
+  decodeS2C_FishCatch,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
   decodeS2C_Kick,
@@ -51,6 +61,9 @@ import {
   type HzmjSettle,
   type PhzGameStart,
   type PhzSettle,
+  type FishGameStart,
+  type FishSeatInfo,
+  type FishSnap,
 } from './frame'
 
 export type GameHandlers = {
@@ -137,6 +150,32 @@ export type GameHandlers = {
   }) => void
   onPhzSettle?: (s: PhzSettle) => void
   onPhzLiuJu?: (s: { banker_seat: number }) => void
+  onFishGameStart?: (s: FishGameStart) => void
+  onFishSeatUpdate?: (s: FishSeatInfo) => void
+  onFishSpawn?: (fish: FishSnap[]) => void
+  onFishDespawn?: (s: { fish_ids: number[]; reason: string }) => void
+  onFishFire?: (s: {
+    seat_id: number
+    uid: number
+    bullet_id: number
+    mult: number
+    x: number
+    y: number
+    vx: number
+    vy: number
+    client_seq: number
+    gold: number
+    cost: number
+  }) => void
+  onFishHit?: (s: { bullet_id: number; fish_id: number; seat_id: number; hp: number; hp_max: number }) => void
+  onFishCatch?: (s: {
+    fish_id: number
+    type_id: number
+    seat_id: number
+    uid: number
+    reward: number
+    gold: number
+  }) => void
 }
 
 export class GameSocket {
@@ -214,6 +253,15 @@ export class GameSocket {
   }
   phzAction(action: number, chiHand: number[] = []) {
     this.send(MsgId.C2S_PhzAction, encodeC2S_PhzAction(action, chiHand))
+  }
+  fishFire(mult: number, aim_x: number, aim_y: number, client_seq: number, lock_fish_id = 0) {
+    this.send(MsgId.C2S_FishFire, encodeC2S_FishFire(mult, aim_x, aim_y, client_seq, lock_fish_id))
+  }
+  fishSetMult(mult: number) {
+    this.send(MsgId.C2S_FishSetMult, encodeC2S_FishSetMult(mult))
+  }
+  fishLeave() {
+    this.send(MsgId.C2S_FishLeave, encodeC2S_FishLeave())
   }
   trace(roundId: number, seatId: number, game: string, event: string, detail: string) {
     if (roundId <= 0) return
@@ -359,6 +407,39 @@ export class GameSocket {
       const r = decodeS2C_PhzLiuJu(body)
       this.log(`PhzLiuJu banker=${r.banker_seat}`)
       this.handlers.onPhzLiuJu?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_FishGameStart) {
+      const r = decodeS2C_FishGameStart(body)
+      this.log(`FishStart seat=${r.self_seat} fish=${r.fish.length}`)
+      this.handlers.onFishGameStart?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_FishSeatUpdate) {
+      const r = decodeS2C_FishSeatUpdate(body)
+      if (r) this.handlers.onFishSeatUpdate?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_FishSpawn) {
+      this.handlers.onFishSpawn?.(decodeS2C_FishSpawn(body))
+      return
+    }
+    if (msgId === MsgId.S2C_FishDespawn) {
+      this.handlers.onFishDespawn?.(decodeS2C_FishDespawn(body))
+      return
+    }
+    if (msgId === MsgId.S2C_FishFireBroadcast) {
+      this.handlers.onFishFire?.(decodeS2C_FishFireBroadcast(body))
+      return
+    }
+    if (msgId === MsgId.S2C_FishHit) {
+      this.handlers.onFishHit?.(decodeS2C_FishHit(body))
+      return
+    }
+    if (msgId === MsgId.S2C_FishCatch) {
+      const r = decodeS2C_FishCatch(body)
+      this.log(`FishCatch fish=${r.fish_id} reward=${r.reward}`)
+      this.handlers.onFishCatch?.(r)
       return
     }
     if (msgId === MsgId.S2C_ActivityUpdate) {

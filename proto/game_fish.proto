@@ -1,0 +1,125 @@
+syntax = "proto3";
+package pandora;
+
+message FishSeatInfo {
+  int32 seat_id = 1;
+  int64 uid = 2;
+  string nickname = 3;
+  int32 cannon_mult = 4;
+  bool online = 5;
+  int64 gold = 6;
+}
+
+message FishSnapshot {
+  int64 fish_id = 1;
+  int32 type_id = 2;
+  float x = 3;
+  float y = 4;
+  float vx = 5;
+  float vy = 6;
+  float radius = 7;
+  int32 hp = 8;
+  int32 hp_max = 9;
+}
+
+// msg_id = 500001
+message S2C_FishGameStart {
+  int64 round_id = 1;
+  int64 room_id = 2;
+  int32 template_id = 3;
+  int32 self_seat = 4;
+  int32 base_score = 5;
+  repeated int32 cannon_mults = 6;
+  repeated FishSeatInfo seats = 7;
+  repeated FishSnapshot fish = 8;
+  string cfg_snapshot = 9;
+}
+
+// msg_id = 500002
+message S2C_FishSeatUpdate {
+  FishSeatInfo seat = 1;
+}
+
+// msg_id = 500003
+message S2C_FishSpawn {
+  repeated FishSnapshot fish = 1;
+}
+
+// msg_id = 500004
+message S2C_FishDespawn {
+  repeated int64 fish_ids = 1;
+  string reason = 2;
+}
+
+// msg_id = 500005
+message S2C_FishSync {
+  repeated FishSnapshot fish = 1;
+}
+
+// msg_id = 500006
+message C2S_FishFire {
+  int32 mult = 1;
+  float aim_x = 2;
+  float aim_y = 3;
+  int64 lock_fish_id = 4;
+  int64 client_seq = 5;
+}
+
+// msg_id = 500007
+message S2C_FishFireBroadcast {
+  int32 seat_id = 1;
+  int64 uid = 2;
+  int64 bullet_id = 3;
+  int32 mult = 4;
+  float x = 5;
+  float y = 6;
+  float vx = 7;
+  float vy = 8;
+  int64 client_seq = 9;
+  int64 gold = 10;
+  int64 cost = 11;
+}
+
+// msg_id = 500008
+message S2C_FishHit {
+  int64 bullet_id = 1;
+  int64 fish_id = 2;
+  int32 seat_id = 3;
+  int32 hp = 4;
+  int32 hp_max = 5;
+}
+
+// msg_id = 500009
+message S2C_FishCatch {
+  int64 fish_id = 1;
+  int32 type_id = 2;
+  int32 seat_id = 3;
+  int64 uid = 4;
+  int64 reward = 5;
+  int64 gold = 6;
+}
+
+// msg_id = 500010
+message C2S_FishSetMult {
+  int32 mult = 1;
+}
+
+// msg_id = 500011
+message C2S_FishLeave {}
+
+// msg_id = 500012
+message S2C_FishKickSeat {
+  int32 seat_id = 1;
+  string reason = 2;
+}
+
+// msg_id = 500013
+message S2C_FishWave {
+  int32 wave_id = 1;
+  string name = 2;
+}
+
+// msg_id = 500014
+message C2S_FishLock {
+  int64 fish_id = 1;
+}

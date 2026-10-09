@@ -13,11 +13,18 @@ int32_t NormalizeTemplateGameId(int32_t game_id) {
   if (game_id == 1) return GameId::kDdz;
   if (game_id == 2) return GameId::kHzmj;
   if (game_id == 3) return GameId::kPhz;
+  if (game_id == 4) return GameId::kFish;
   if (game_id < GameId::kMin) return GameId::kDdz;
   return game_id;
 }
 
 int SeatsFor(int32_t game_id) { return GameRegistry::Instance().DefaultSeats(game_id); }
+
+// Match queue size: fish formal allows solo (1); others use seat count.
+int MatchPlayersFor(int32_t game_id) {
+  if (game_id == GameId::kFish) return 1;
+  return SeatsFor(game_id);
+}
 
 }  // namespace
 
@@ -76,6 +83,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
   rake_bp_.clear();
   bool has_hzmj = false;
   bool has_phz = false;
+  bool has_fish = false;
   for (const auto& row : *rows) {
     proto_wire::LobbyTemplate t;
     t.id = row.Int("id");
@@ -85,7 +93,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     if (t.game_id != raw_gid) {
       mysql.ExecBind("UPDATE room_template SET game_id=? WHERE id=?", {I64(t.game_id), I64(t.id)});
     }
-    t.players = SeatsFor(t.game_id);
+    t.players = MatchPlayersFor(t.game_id);
     t.name = row.Str("name");
     t.base_score = row.Int("base_score");
     rake_bp_[t.id] = row.Int("rake_bp");
@@ -95,6 +103,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     templates_.push_back(t);
     if (t.game_id == GameId::kHzmj) has_hzmj = true;
     if (t.game_id == GameId::kPhz) has_phz = true;
+    if (t.game_id == GameId::kFish) has_fish = true;
   }
   if (!has_hzmj) {
     proto_wire::LobbyTemplate hz;
@@ -123,7 +132,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     phz.max_gold = cfg_.max_gold;
     phz.enabled = true;
     phz.game_id = GameId::kPhz;
-    phz.players = SeatsFor(GameId::kPhz);
+    phz.players = MatchPlayersFor(GameId::kPhz);
     templates_.push_back(phz);
     rake_bp_[3] = cfg_.rake_bp;
     mysql.ExecBind(
@@ -131,6 +140,24 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
         "VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE game_id=VALUES(game_id)",
         {I64(3), I64(GameId::kPhz), Str(phz.name), I64(phz.base_score), I64(cfg_.rake_bp), I64(phz.min_gold),
          I64(phz.max_gold)});
+  }
+  if (!has_fish) {
+    proto_wire::LobbyTemplate fish;
+    fish.id = 4;
+    fish.name = "FishNovice";
+    fish.base_score = cfg_.base_score;
+    fish.min_gold = cfg_.min_gold;
+    fish.max_gold = cfg_.max_gold;
+    fish.enabled = true;
+    fish.game_id = GameId::kFish;
+    fish.players = MatchPlayersFor(GameId::kFish);
+    templates_.push_back(fish);
+    rake_bp_[4] = cfg_.rake_bp;
+    mysql.ExecBind(
+        "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) "
+        "VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE game_id=VALUES(game_id)",
+        {I64(4), I64(GameId::kFish), Str(fish.name), I64(fish.base_score), I64(cfg_.rake_bp), I64(fish.min_gold),
+         I64(fish.max_gold)});
   }
   PLOG_INFO("lobby templates reloaded count=" << templates_.size());
 }
@@ -156,8 +183,11 @@ void LobbyService::UpsertTemplate(int id, const std::string& name, int base_scor
   t.min_gold = min_gold;
   t.max_gold = max_gold;
   t.enabled = enabled;
-  t.game_id = (id == 2) ? GameId::kHzmj : (id == 3) ? GameId::kPhz : GameId::kDdz;
-  t.players = SeatsFor(t.game_id);
+  t.game_id = (id == 2)   ? GameId::kHzmj
+              : (id == 3) ? GameId::kPhz
+              : (id == 4) ? GameId::kFish
+                          : GameId::kDdz;
+  t.players = MatchPlayersFor(t.game_id);
   templates_.push_back(t);
 }
 

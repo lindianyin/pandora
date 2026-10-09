@@ -51,6 +51,13 @@ enum class Err : int32_t {
   kPhzIllegalDiscard = 4000001,
   kPhzIllegalAction = 4000002,
 
+  kFishIllegalMult = 5000001,
+  kFishFireTooFast = 5000002,
+  kFishInsufficient = 5000003,
+  kFishBadSeat = 5000004,
+  kFishBadLock = 5000005,
+  kFishDupSeq = 5000006,
+
   kInternal = 90001,
 };
 
@@ -120,6 +127,18 @@ inline const char* ErrMessage(Err e) {
       return "illegal discard";
     case Err::kPhzIllegalAction:
       return "illegal action";
+    case Err::kFishIllegalMult:
+      return "illegal cannon mult";
+    case Err::kFishFireTooFast:
+      return "fire too fast";
+    case Err::kFishInsufficient:
+      return "insufficient balance";
+    case Err::kFishBadSeat:
+      return "bad seat";
+    case Err::kFishBadLock:
+      return "illegal lock target";
+    case Err::kFishDupSeq:
+      return "duplicate fire seq";
     case Err::kInternal:
     default:
       return "internal error";
@@ -189,6 +208,21 @@ constexpr uint32_t kC2S_PhzAction = 400007;
 constexpr uint32_t kS2C_PhzActionBroadcast = 400008;
 constexpr uint32_t kS2C_PhzSettle = 400009;
 constexpr uint32_t kS2C_PhzLiuJu = 400010;
+
+constexpr uint32_t kS2C_FishGameStart = 500001;
+constexpr uint32_t kS2C_FishSeatUpdate = 500002;
+constexpr uint32_t kS2C_FishSpawn = 500003;
+constexpr uint32_t kS2C_FishDespawn = 500004;
+constexpr uint32_t kS2C_FishSync = 500005;
+constexpr uint32_t kC2S_FishFire = 500006;
+constexpr uint32_t kS2C_FishFireBroadcast = 500007;
+constexpr uint32_t kS2C_FishHit = 500008;
+constexpr uint32_t kS2C_FishCatch = 500009;
+constexpr uint32_t kC2S_FishSetMult = 500010;
+constexpr uint32_t kC2S_FishLeave = 500011;
+constexpr uint32_t kS2C_FishKickSeat = 500012;
+constexpr uint32_t kS2C_FishWave = 500013;
+constexpr uint32_t kC2S_FishLock = 500014;
 
 constexpr uint32_t kC2S_ClientTrace = 9001;
 }  // namespace MsgId

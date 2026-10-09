@@ -24,6 +24,7 @@ set(PROTO_FILES
   "${PROTO_DIR}/game_ddz.proto"
   "${PROTO_DIR}/game_hzmj.proto"
   "${PROTO_DIR}/game_phz.proto"
+  "${PROTO_DIR}/game_fish.proto"
   "${PROTO_DIR}/activity.proto"
   "${PROTO_DIR}/social.proto"
   "${PROTO_DIR}/bag.proto"
@@ -35,6 +36,7 @@ set(GENERATED_SRCS
   "${GENERATED_DIR}/game_ddz.pb.cc"
   "${GENERATED_DIR}/game_hzmj.pb.cc"
   "${GENERATED_DIR}/game_phz.pb.cc"
+  "${GENERATED_DIR}/game_fish.pb.cc"
   "${GENERATED_DIR}/activity.pb.cc"
   "${GENERATED_DIR}/social.pb.cc"
   "${GENERATED_DIR}/bag.pb.cc"
@@ -45,6 +47,7 @@ set(GENERATED_HDRS
   "${GENERATED_DIR}/game_ddz.pb.h"
   "${GENERATED_DIR}/game_hzmj.pb.h"
   "${GENERATED_DIR}/game_phz.pb.h"
+  "${GENERATED_DIR}/game_fish.pb.h"
   "${GENERATED_DIR}/activity.pb.h"
   "${GENERATED_DIR}/social.pb.h"
   "${GENERATED_DIR}/bag.pb.h"
@@ -91,6 +94,9 @@ add_executable(pandora-server
   src/game/ddz/ddz_room_game.cpp
   src/game/hzmj/hzmj_room_game.cpp
   src/game/phz/phz_room_game.cpp
+  src/game/fish/fish_room_game.cpp
+  src/game/fish/table.cpp
+  src/game/fish/config_store.cpp
   src/game/ddz_cards.cpp
   src/game/hzmj/tiles.cpp
   src/game/hzmj/meld.cpp
@@ -176,6 +182,17 @@ add_executable(phz_table_test
   src/game/phz/table.cpp
 )
 target_include_directories(phz_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(fish_math_test
+  tests/fish_math_test.cpp
+)
+target_include_directories(fish_math_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(fish_table_test
+  tests/fish_table_test.cpp
+  src/game/fish/table.cpp
+)
+target_include_directories(fish_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_custom_command(TARGET pandora-server POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:pandora-server>/conf

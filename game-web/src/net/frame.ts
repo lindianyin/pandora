@@ -54,6 +54,18 @@ import {
   S2C_PhzSettle,
   S2C_PhzTurn,
 } from '../gen/game_phz'
+import {
+  C2S_FishFire,
+  C2S_FishLeave,
+  C2S_FishSetMult,
+  S2C_FishCatch,
+  S2C_FishDespawn,
+  S2C_FishFireBroadcast,
+  S2C_FishGameStart,
+  S2C_FishHit,
+  S2C_FishSeatUpdate,
+  S2C_FishSpawn,
+} from '../gen/game_fish'
 import { S2C_ActivityUpdate } from '../gen/activity'
 
 export const MsgId = {
@@ -101,6 +113,20 @@ export const MsgId = {
   S2C_PhzActionBroadcast: 400008,
   S2C_PhzSettle: 400009,
   S2C_PhzLiuJu: 400010,
+  S2C_FishGameStart: 500001,
+  S2C_FishSeatUpdate: 500002,
+  S2C_FishSpawn: 500003,
+  S2C_FishDespawn: 500004,
+  S2C_FishSync: 500005,
+  C2S_FishFire: 500006,
+  S2C_FishFireBroadcast: 500007,
+  S2C_FishHit: 500008,
+  S2C_FishCatch: 500009,
+  C2S_FishSetMult: 500010,
+  C2S_FishLeave: 500011,
+  S2C_FishKickSeat: 500012,
+  S2C_FishWave: 500013,
+  C2S_FishLock: 500014,
   C2S_ClientTrace: 9001,
 } as const
 
@@ -115,6 +141,7 @@ export const GameId = {
   Ddz: 2000,
   Hzmj: 3000,
   Phz: 4000,
+  Fish: 5000,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {
@@ -336,7 +363,13 @@ export function decodeS2C_LobbyInfo(body: Uint8Array): {
       max_gold: t.max_gold,
       enabled: t.enabled,
       game_id: t.game_id || GameId.Ddz,
-      players: t.players || (t.game_id === GameId.Hzmj || t.game_id === 2 ? 4 : 3),
+      players:
+        t.players ||
+        (t.game_id === GameId.Fish || t.game_id === 4
+          ? 1
+          : t.game_id === GameId.Hzmj || t.game_id === 2
+            ? 4
+            : 3),
     })),
     gold: m.gold,
     diamond: m.diamond,
@@ -682,4 +715,192 @@ export function decodeS2C_PhzSettle(body: Uint8Array): PhzSettle {
 export function decodeS2C_PhzLiuJu(body: Uint8Array): { banker_seat: number } {
   const m = S2C_PhzLiuJu.decode(body)
   return { banker_seat: m.banker_seat }
+}
+
+export type FishSeatInfo = {
+  seat_id: number
+  uid: number
+  nickname: string
+  cannon_mult: number
+  online: boolean
+  gold: number
+}
+
+export type FishSnap = {
+  fish_id: number
+  type_id: number
+  x: number
+  y: number
+  vx: number
+  vy: number
+  radius: number
+  hp: number
+  hp_max: number
+}
+
+export type FishGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  self_seat: number
+  base_score: number
+  cannon_mults: number[]
+  seats: FishSeatInfo[]
+  fish: FishSnap[]
+  cfg_snapshot: string
+}
+
+export function encodeC2S_FishFire(
+  mult: number,
+  aim_x: number,
+  aim_y: number,
+  client_seq: number,
+  lock_fish_id = 0,
+): Uint8Array {
+  return C2S_FishFire.encode({
+    mult,
+    aim_x,
+    aim_y,
+    lock_fish_id,
+    client_seq,
+  }).finish()
+}
+
+export function encodeC2S_FishSetMult(mult: number): Uint8Array {
+  return C2S_FishSetMult.encode({ mult }).finish()
+}
+
+export function encodeC2S_FishLeave(): Uint8Array {
+  return C2S_FishLeave.encode({}).finish()
+}
+
+export function decodeS2C_FishGameStart(body: Uint8Array): FishGameStart {
+  const m = S2C_FishGameStart.decode(body)
+  return {
+    round_id: m.round_id,
+    room_id: m.room_id,
+    template_id: m.template_id,
+    self_seat: m.self_seat,
+    base_score: m.base_score,
+    cannon_mults: [...m.cannon_mults],
+    seats: m.seats.map((s) => ({
+      seat_id: s.seat_id,
+      uid: s.uid,
+      nickname: s.nickname,
+      cannon_mult: s.cannon_mult,
+      online: s.online,
+      gold: s.gold,
+    })),
+    fish: m.fish.map((f) => ({
+      fish_id: f.fish_id,
+      type_id: f.type_id,
+      x: f.x,
+      y: f.y,
+      vx: f.vx,
+      vy: f.vy,
+      radius: f.radius,
+      hp: f.hp,
+      hp_max: f.hp_max,
+    })),
+    cfg_snapshot: m.cfg_snapshot,
+  }
+}
+
+export function decodeS2C_FishSeatUpdate(body: Uint8Array): FishSeatInfo | null {
+  const m = S2C_FishSeatUpdate.decode(body)
+  if (!m.seat) return null
+  const s = m.seat
+  return {
+    seat_id: s.seat_id,
+    uid: s.uid,
+    nickname: s.nickname,
+    cannon_mult: s.cannon_mult,
+    online: s.online,
+    gold: s.gold,
+  }
+}
+
+export function decodeS2C_FishSpawn(body: Uint8Array): FishSnap[] {
+  const m = S2C_FishSpawn.decode(body)
+  return m.fish.map((f) => ({
+    fish_id: f.fish_id,
+    type_id: f.type_id,
+    x: f.x,
+    y: f.y,
+    vx: f.vx,
+    vy: f.vy,
+    radius: f.radius,
+    hp: f.hp,
+    hp_max: f.hp_max,
+  }))
+}
+
+export function decodeS2C_FishDespawn(body: Uint8Array): { fish_ids: number[]; reason: string } {
+  const m = S2C_FishDespawn.decode(body)
+  return { fish_ids: [...m.fish_ids], reason: m.reason }
+}
+
+export function decodeS2C_FishFireBroadcast(body: Uint8Array): {
+  seat_id: number
+  uid: number
+  bullet_id: number
+  mult: number
+  x: number
+  y: number
+  vx: number
+  vy: number
+  client_seq: number
+  gold: number
+  cost: number
+} {
+  const m = S2C_FishFireBroadcast.decode(body)
+  return {
+    seat_id: m.seat_id,
+    uid: m.uid,
+    bullet_id: m.bullet_id,
+    mult: m.mult,
+    x: m.x,
+    y: m.y,
+    vx: m.vx,
+    vy: m.vy,
+    client_seq: m.client_seq,
+    gold: m.gold,
+    cost: m.cost,
+  }
+}
+
+export function decodeS2C_FishHit(body: Uint8Array): {
+  bullet_id: number
+  fish_id: number
+  seat_id: number
+  hp: number
+  hp_max: number
+} {
+  const m = S2C_FishHit.decode(body)
+  return {
+    bullet_id: m.bullet_id,
+    fish_id: m.fish_id,
+    seat_id: m.seat_id,
+    hp: m.hp,
+    hp_max: m.hp_max,
+  }
+}
+
+export function decodeS2C_FishCatch(body: Uint8Array): {
+  fish_id: number
+  type_id: number
+  seat_id: number
+  uid: number
+  reward: number
+  gold: number
+} {
+  const m = S2C_FishCatch.decode(body)
+  return {
+    fish_id: m.fish_id,
+    type_id: m.type_id,
+    seat_id: m.seat_id,
+    uid: m.uid,
+    reward: m.reward,
+    gold: m.gold,
+  }
 }

@@ -72,6 +72,7 @@ function doLogin() {
       <button class="ghost" @click="$router.push('/hzmj-lab')">麻将四联调试</button>
       <button class="ghost" @click="$router.push('/ddz-lab')">斗地主三联调试</button>
       <button class="ghost" @click="$router.push('/phz-lab')">跑胡子三联调试</button>
+      <button class="ghost" @click="$router.push('/fish-lab')">捕鱼双联调试</button>
     </div>
   </section>
 

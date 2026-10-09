@@ -7,7 +7,7 @@
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
-/** msg_id = 6001 */
+/** msg_id = 300001 */
 export interface S2C_HzmjGameStart {
   round_id: number;
   room_id: number;
@@ -23,7 +23,7 @@ export interface S2C_HzmjGameStart {
   base_score: number;
 }
 
-/** msg_id = 6002 */
+/** msg_id = 300002 */
 export interface S2C_HzmjTurn {
   /** optional so seat 0 is present on wire */
   seat_id?:
@@ -40,32 +40,32 @@ export interface S2C_HzmjTurn {
   can_zimo: boolean;
 }
 
-/** msg_id = 6003 */
+/** msg_id = 300003 */
 export interface S2C_HzmjDraw {
   seat_id: number;
   /** -1 if not self */
   tile: number;
 }
 
-/** msg_id = 6004 */
+/** msg_id = 300005 */
 export interface C2S_HzmjDiscard {
   tile: number;
 }
 
-/** msg_id = 6005 */
+/** msg_id = 300006 */
 export interface S2C_HzmjDiscardBroadcast {
   seat_id?: number | undefined;
   tile: number;
 }
 
-/** msg_id = 6006 */
+/** msg_id = 300007 */
 export interface C2S_HzmjAction {
   /** 0 pass 1 chi 2 peng 3 gang 4 hu */
   action: number;
   chi_hand_tiles: number[];
 }
 
-/** msg_id = 6007 */
+/** msg_id = 300008 */
 export interface S2C_HzmjActionBroadcast {
   seat_id: number;
   /** 1 chi 2 peng 3 gang(明/暗/补) */
@@ -80,7 +80,7 @@ export interface S2C_HzmjActionBroadcast {
   meld_kind: number;
 }
 
-/** msg_id = 6009 */
+/** msg_id = 300009 */
 export interface S2C_HzmjSettle {
   round_id: number;
   winner_seat: number;
@@ -100,12 +100,12 @@ export interface S2C_HzmjSettle_Entry {
   delta_gold: number;
 }
 
-/** msg_id = 6010 */
+/** msg_id = 300010 */
 export interface S2C_HzmjLiuJu {
   lian_zhuang: number;
 }
 
-/** msg_id = 6012 */
+/** msg_id = 300011 */
 export interface C2S_HzmjGang {
   /** 0 an 1 bu */
   kind: number;

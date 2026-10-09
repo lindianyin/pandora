@@ -8,6 +8,7 @@
 #include "common/errors.hpp"
 #include "common/log.hpp"
 #include "common/sha1.hpp"
+#include "game/fish/config_store.hpp"
 #include "lobby/lobby_service.hpp"
 
 namespace pandora {
@@ -68,12 +69,53 @@ void AdminService::Bootstrap() {
   }
   lobby_.ReloadFromDb(mysql_);
   pay_.ReloadFromDb(mysql_);
-  
+  // Ensure fish config tables exist (idempotent) then load memory config.
+  mysql_.Exec(
+      "CREATE TABLE IF NOT EXISTS `fish_type` ("
+      "`type_id` INT NOT NULL PRIMARY KEY,"
+      "`name` VARCHAR(64) NOT NULL,"
+      "`score` INT NOT NULL,"
+      "`kind` ENUM('odds','hp') NOT NULL,"
+      "`hp` INT NOT NULL DEFAULT 0,"
+      "`weight` INT NOT NULL DEFAULT 1,"
+      "`radius` INT NOT NULL DEFAULT 40,"
+      "`special` VARCHAR(32) NOT NULL DEFAULT 'none',"
+      "`enabled` TINYINT NOT NULL DEFAULT 1,"
+      "`updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)"
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+  mysql_.Exec(
+      "CREATE TABLE IF NOT EXISTS `fish_wave` ("
+      "`id` INT NOT NULL AUTO_INCREMENT,"
+      "`name` VARCHAR(64) NOT NULL,"
+      "`duration_ms` INT NOT NULL DEFAULT 60000,"
+      "`spawn_interval_ms` INT NOT NULL DEFAULT 800,"
+      "`max_alive` INT NOT NULL DEFAULT 30,"
+      "`boss_type_id` INT NOT NULL DEFAULT 0,"
+      "`weight` INT NOT NULL DEFAULT 1,"
+      "`enabled` TINYINT NOT NULL DEFAULT 1,"
+      "PRIMARY KEY (`id`)"
+      ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+  mysql_.Exec(
+      "INSERT INTO `fish_type` (`type_id`,`name`,`score`,`kind`,`hp`,`weight`,`radius`,`special`,`enabled`) VALUES "
+      "(1,'small',10,'odds',0,50,30,'none',1),(2,'mid',50,'odds',0,20,45,'none',1),(3,'tank',200,'hp',100,5,60,'none',1) "
+      "ON DUPLICATE KEY UPDATE `enabled`=VALUES(`enabled`)");
+  mysql_.Exec(
+      "INSERT INTO `fish_wave` (`id`,`name`,`duration_ms`,`spawn_interval_ms`,`max_alive`,`boss_type_id`,`weight`,`enabled`) "
+      "VALUES (1,'normal',60000,500,20,0,1,1) ON DUPLICATE KEY UPDATE `enabled`=VALUES(`enabled`)");
+  fish::FishConfigStore::Instance().Reload(mysql_);
 
   auto v = redis_.Get("ops:maintain");
   if (!v) redis_.Set("ops:maintain", "0");
-  
+}
 
+bool AdminService::ReloadFishConfig(const AdminSession& admin, std::string* err) {
+  if (!RequireRole(admin, AdminRole::kOps)) {
+    if (err) *err = "forbidden";
+    return false;
+  }
+  fish::FishConfigStore::Instance().Reload(mysql_);
+  Audit(admin.admin_id, "reload_fish_config", "", "", "");
+  return true;
 }
 
 AdminLoginResult AdminService::Login(const std::string& username, const std::string& password) {

@@ -272,6 +272,22 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
                            trace));
       }
     }
+  } else if (method == "POST" && path == "/api/v1/wallet/lab_topup") {
+    // Dev/lab helper: top up gold for fish / table testing (capped).
+    auto uid = requirePlayer();
+    if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
+    else {
+      int64_t amount = JInt(body, "amount", 100000);
+      if (amount <= 0) amount = 100000;
+      if (amount > 1000000) amount = 1000000;
+      const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+      const std::string key = "lab:topup:" + std::to_string(*uid) + ":" + std::to_string(ms);
+      auto r = wallet.Adjust(*uid, Currency::kGold, amount, "lab_topup", key);
+      if (!r.ok) setJson(400, ErrObj(Err::kBadParam, trace, r.error));
+      else setJson(200, OkObj({{"gold", r.balance}, {"added", amount}}, trace));
+    }
   } else if (method == "GET" && path == "/api/v1/bag/list") {
     auto uid = requirePlayer();
     if (!uid) setJson(401, ErrObj(Err::kUnauthorized, trace));
@@ -594,6 +610,14 @@ HttpResult Dispatch(const http::request<http::string_body>& req, MemoryStore& /*
           if (!ok) setJson(400, ErrObj(Err::kBadParam, trace, err));
           else setJson(200, OkObj({{"ok", true}}, trace));
         }
+      }
+    } else if (method == "POST" && path == "/admin/v1/fish/reload") {
+      auto s = requireAdmin(AdminRole::kOps);
+      if (!s) setJson(403, ErrObj(Err::kForbidden, trace));
+      else {
+        std::string err;
+        if (!admin.ReloadFishConfig(*s, &err)) setJson(400, ErrObj(Err::kBadParam, trace, err));
+        else setJson(200, OkObj({{"ok", true}}, trace));
       }
     } else if (method == "GET" && path == "/admin/v1/pay/products") {
       auto s = requireAdmin(AdminRole::kCs);

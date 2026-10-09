@@ -21,15 +21,15 @@ proto/                # 唯一协议契约（.proto）
 server/               # C++ pandora-server（MSVC / CMake）
   src/net/            # HTTP、WSS、帧、SessionHub、IOCP
   src/auth/ lobby/ match/ room/ game/
-  src/game/           # GameRegistry + IRoomGame；game_id 2000/3000/4000
-  src/game/ddz|hzmj|phz/  # 规则 Table + *_room_game 适配器
+  src/game/           # GameRegistry + IRoomGame；game_id 2000/3000/4000/5000
+  src/game/ddz|hzmj|phz|fish/  # 规则 Table + *_room_game 适配器
   src/wallet/ pay/ activity/ admin/ social/ bag/
   src/store/          # MysqlClient、RedisClient、MemoryStore
   conf/               # server.json / server.tls.json
   sql/                # schema.sql
   scripts/            # build.ps1、*_smoke.mjs、ccu_load.mjs
-  tests/              # hzmj_*_test、phz_*_test、ddz_cards_test
-game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab
+  tests/              # hzmj_*_test、phz_*_test、fish_*_test、ddz_cards_test
+game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab /fish-lab
 admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
 docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```
@@ -39,7 +39,7 @@ docker-compose.yml    # MySQL 5.7 + Redis 6.2
 命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`。对局轨迹用 `LogRound`（`server/src/common/log.hpp`），行格式：
 
 ```text
-round=<局号> src=server|client game=hzmj|ddz|phz room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
+round=<局号> src=server|client game=hzmj|ddz|phz|fish room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
 ```
 
 文件在进程工作目录 `logs/pandora_YYYY-MM-DD.log`（从 `server/` 启动即为 `server/logs/`）。客户端经 `C2S_ClientTrace`（9001）上报，服务端用 `RoomOf(uid)` 填房间号。座位类事件的 `uid` 取该座位玩家。
@@ -72,6 +72,7 @@ node server\scripts\admin_smoke.mjs
 node server\scripts\activity_smoke.mjs
 node server\scripts\hzmj_smoke.mjs
 node server\scripts\phz_smoke.mjs
+node server\scripts\fish_smoke.mjs
 node server\scripts\ccu_load.mjs --target 200
 ```
 
@@ -82,8 +83,12 @@ cmake --build server\build --config Release --target hzmj_table_test
 cmake --build server\build --config Release --target hzmj_rules_test
 cmake --build server\build --config Release --target phz_table_test
 cmake --build server\build --config Release --target phz_rules_test
+cmake --build server\build --config Release --target fish_math_test
+cmake --build server\build --config Release --target fish_table_test
 server\build\Release\hzmj_table_test.exe
 server\build\Release\phz_table_test.exe
+server\build\Release\fish_math_test.exe
+server\build\Release\fish_table_test.exe
 cd game-web
 npm test
 ```

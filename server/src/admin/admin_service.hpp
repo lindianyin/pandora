@@ -62,6 +62,7 @@ class AdminService {
                LobbyService& lobby, SessionHub& hub, AsyncWorker& persist);
 
   void Bootstrap();
+  bool ReloadFishConfig(const AdminSession& admin, std::string* err);
 
   AdminLoginResult Login(const std::string& username, const std::string& password);
   std::optional<AdminSession> Validate(const std::string& token);

@@ -7,7 +7,7 @@
 /* eslint-disable */
 import { BinaryReader, BinaryWriter } from "@bufbuild/protobuf/wire";
 
-/** msg_id = 2001 */
+/** msg_id = 200001 */
 export interface S2C_DdzGameStart {
   seat_id: number;
   hand_cards: number[];
@@ -16,31 +16,31 @@ export interface S2C_DdzGameStart {
   round_id: number;
 }
 
-/** msg_id = 2002 */
+/** msg_id = 200002 */
 export interface S2C_DdzTurn {
   seat_id: number;
   phase: string;
   timeout_s: number;
 }
 
-/** msg_id = 2003 */
+/** msg_id = 200003 */
 export interface C2S_DdzBid {
   score: number;
 }
 
-/** msg_id = 2004 */
+/** msg_id = 200004 */
 export interface S2C_DdzBidBroadcast {
   seat_id: number;
   score: number;
 }
 
-/** msg_id = 2005 */
+/** msg_id = 200005 */
 export interface C2S_DdzPlay {
   pass: boolean;
   cards: number[];
 }
 
-/** msg_id = 2006 */
+/** msg_id = 200006 */
 export interface S2C_DdzPlayBroadcast {
   seat_id: number;
   pass: boolean;
@@ -48,7 +48,7 @@ export interface S2C_DdzPlayBroadcast {
   cards_left: number;
 }
 
-/** msg_id = 2007 */
+/** msg_id = 200007 */
 export interface S2C_DdzSettle {
   round_id: number;
   base_score: number;
@@ -62,7 +62,7 @@ export interface S2C_DdzSettle_Entry {
   delta_gold: number;
 }
 
-/** msg_id = 2008 */
+/** msg_id = 200008 */
 export interface S2C_DdzReconnect {
   seat_id: number;
   phase: string;

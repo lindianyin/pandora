@@ -246,8 +246,46 @@ INSERT INTO `room_template` (`id`, `game_id`, `name`, `base_score`, `rake_bp`, `
 VALUES
   (1, 2000, '初级场', 100, 500, 1000, 0, 1),
   (2, 3000, '杭州麻将初级场', 100, 500, 1000, 0, 1),
-  (3, 4000, '跑胡子初级场', 100, 500, 1000, 0, 1)
+  (3, 4000, '跑胡子初级场', 100, 500, 1000, 0, 1),
+  (4, 5000, '捕鱼初级场', 100, 500, 1000, 0, 1)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `game_id`=VALUES(`game_id`);
+
+CREATE TABLE IF NOT EXISTS `fish_type` (
+  `type_id` INT NOT NULL PRIMARY KEY,
+  `name` VARCHAR(64) NOT NULL,
+  `score` INT NOT NULL,
+  `kind` ENUM('odds','hp') NOT NULL,
+  `hp` INT NOT NULL DEFAULT 0,
+  `weight` INT NOT NULL DEFAULT 1,
+  `radius` INT NOT NULL DEFAULT 40,
+  `special` VARCHAR(32) NOT NULL DEFAULT 'none',
+  `enabled` TINYINT NOT NULL DEFAULT 1,
+  `updated_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `fish_wave` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `name` VARCHAR(64) NOT NULL,
+  `duration_ms` INT NOT NULL DEFAULT 60000,
+  `spawn_interval_ms` INT NOT NULL DEFAULT 800,
+  `max_alive` INT NOT NULL DEFAULT 30,
+  `boss_type_id` INT NOT NULL DEFAULT 0,
+  `weight` INT NOT NULL DEFAULT 1,
+  `enabled` TINYINT NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO `fish_type` (`type_id`,`name`,`score`,`kind`,`hp`,`weight`,`radius`,`special`,`enabled`)
+VALUES
+  (1, 'small', 10, 'odds', 0, 50, 30, 'none', 1),
+  (2, 'mid', 50, 'odds', 0, 20, 45, 'none', 1),
+  (3, 'tank', 200, 'hp', 100, 5, 60, 'none', 1)
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `score`=VALUES(`score`);
+
+INSERT INTO `fish_wave` (`id`,`name`,`duration_ms`,`spawn_interval_ms`,`max_alive`,`boss_type_id`,`weight`,`enabled`)
+VALUES
+  (1, 'normal', 60000, 500, 20, 0, 1, 1)
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`);
 
 INSERT INTO `pay_product` (`id`, `amount_fen`, `diamond`, `gift_diamond`, `sort`, `enabled`)
 VALUES

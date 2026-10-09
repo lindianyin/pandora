@@ -49,6 +49,17 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/fish',
+      name: 'fish',
+      component: () => import('./views/FishTableView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/fish-lab',
+      name: 'fish-lab',
+      component: () => import('./views/FishLabView.vue'),
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),
