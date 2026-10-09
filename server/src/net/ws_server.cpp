@@ -74,7 +74,7 @@ class WsSessionBase : public ISessionConn {
   void OnTimer(beast::error_code ec) {
     if (ec) return;
     if (std::chrono::steady_clock::now() - last_hb_ > std::chrono::seconds(cfg_.net.heartbeat_timeout_s)) {
-      Send(MsgId::kS2C_Kick, proto_wire::EncodeS2C_Kick(1, "heartbeat timeout"));
+      Send(MsgId::kS2C_Kick, proto_wire::EncodeS2C_Kick(MsgId::kKickHeartbeatTimeout, "heartbeat timeout"));
       Fail();
       return;
     }
@@ -173,7 +173,11 @@ class WsSessionBase : public ISessionConn {
       return;
     }
     write_q_.pop_front();
-    if (!write_q_.empty()) DoWrite();
+    if (!write_q_.empty()) {
+      DoWrite();
+      return;
+    }
+    if (close_after_drain_) Fail();
   }
 
   void Fail() {
@@ -201,7 +205,15 @@ class WsSessionBase : public ISessionConn {
 
   void Close() override {
     auto sp = self().Shared();
-    net::post(self().Strand(), [sp]() { sp->Fail(); });
+    net::post(self().Strand(), [sp]() {
+      auto& d = *sp;
+      if (d.closed_) return;
+      if (!d.write_q_.empty()) {
+        d.close_after_drain_ = true;
+        return;
+      }
+      d.Fail();
+    });
   }
 
  protected:
@@ -215,6 +227,7 @@ class WsSessionBase : public ISessionConn {
   std::chrono::steady_clock::time_point last_hb_{};
   bool authed_{false};
   bool closed_{false};
+  bool close_after_drain_{false};
   int64_t uid_{0};
 };
 

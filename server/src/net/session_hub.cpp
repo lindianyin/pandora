@@ -6,9 +6,22 @@
 namespace pandora {
 
 void SessionHub::Bind(int64_t uid, std::shared_ptr<ISessionConn> conn) {
-  auto& sh = shards_[ShardOf(uid)];
-  std::lock_guard<std::mutex> lk(sh.mu);
-  sh.by_uid[uid] = std::move(conn);
+  std::shared_ptr<ISessionConn> prev;
+  {
+    auto& sh = shards_[ShardOf(uid)];
+    std::lock_guard<std::mutex> lk(sh.mu);
+    auto it = sh.by_uid.find(uid);
+    if (it != sh.by_uid.end() && it->second && it->second.get() != conn.get()) {
+      prev = it->second;
+    }
+    sh.by_uid[uid] = std::move(conn);
+  }
+  // New conn is already online; old conn Close must not clear the new mapping (Unbind checks pointer).
+  if (prev) {
+    prev->Send(MsgId::kS2C_Kick,
+               proto_wire::EncodeS2C_Kick(MsgId::kKickLoggedInElsewhere, "logged in elsewhere"));
+    prev->Close();
+  }
 }
 
 void SessionHub::Unbind(int64_t uid, ISessionConn* conn) {

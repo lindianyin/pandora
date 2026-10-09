@@ -11,8 +11,8 @@ const wide = computed(
 <template>
   <div class="page" :class="{ wide }">
     <header v-if="!wide">
-      <h1>Pandora · 斗地主 (M2b)</h1>
-      <p class="sub">登录 · 大厅匹配 · 牌桌（SPEC 路由 /login /lobby /table）</p>
+      <h1>Pandora · 斗地主</h1>
+      <p class="sub">登录 · 大厅匹配 · 牌桌（路由 /login /lobby /table）</p>
     </header>
     <RouterView />
   </div>

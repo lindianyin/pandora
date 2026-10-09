@@ -1,7 +1,15 @@
 import { computed, ref } from 'vue'
 import { loginGuest, health } from '../api'
 import { GameSocket } from '../net/GameSocket'
-import { cardLabel, sortDdzHand, tileLabel, type LobbyTemplate, type RoomSeat, type HzmjSettle } from '../net/frame'
+import {
+  KickReason,
+  cardLabel,
+  sortDdzHand,
+  tileLabel,
+  type LobbyTemplate,
+  type RoomSeat,
+  type HzmjSettle,
+} from '../net/frame'
 import { canChiClaim, canMingGangClaim, canPengClaim, listChiOptions } from '../net/hzmjMeld'
 import {
   applySelfDiscard,
@@ -103,6 +111,7 @@ const activityTick = {
 let sock: GameSocket | null = null
 let countdownTimer: number | null = null
 let reconnectTimer: number | null = null
+let suppressReconnect = false
 let reconnectAttempts = 0
 let replayingSnapshot = false
 
@@ -571,13 +580,32 @@ function createSocket(): GameSocket {
       pushLog(`activity ${a.activity_id} ${a.type} claimable=${a.claimable}`)
       activityTick.notify()
     },
-    onKick: () => {
-      errorBanner.value = '已被踢下线，尝试重连…'
+    onKick: (reason, message) => {
       wsOk.value = false
+      if (reason === KickReason.LoggedInElsewhere) {
+        suppressReconnect = true
+        if (reconnectTimer != null) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = null
+        }
+        reconnecting.value = false
+        reconnectHint.value = ''
+        errorBanner.value = '账号已在其他设备登录'
+        token.value = ''
+        sessionStorage.removeItem('pandora_token')
+        pushLog(`kicked elsewhere: ${message}`)
+        router.push('/login')
+        return
+      }
+      errorBanner.value = message || '已被踢下线，尝试重连…'
       scheduleReconnect()
     },
     onClose: () => {
       wsOk.value = false
+      if (suppressReconnect) {
+        suppressReconnect = false
+        return
+      }
       scheduleReconnect()
     },
   })

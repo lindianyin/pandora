@@ -133,6 +133,10 @@ constexpr uint32_t kS2C_AuthResult = 2;
 constexpr uint32_t kC2S_Heartbeat = 3;
 constexpr uint32_t kS2C_HeartbeatAck = 4;
 constexpr uint32_t kS2C_Kick = 5;
+
+// S2C_Kick.reason
+constexpr int32_t kKickHeartbeatTimeout = 1;
+constexpr int32_t kKickLoggedInElsewhere = 2;
 constexpr uint32_t kS2C_Maintain = 6;
 constexpr uint32_t kS2C_Error = 7;
 

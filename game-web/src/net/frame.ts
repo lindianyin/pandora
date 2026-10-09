@@ -8,6 +8,7 @@ import {
   C2S_Heartbeat,
   S2C_AuthResult,
   S2C_Error,
+  S2C_Kick,
 } from '../gen/common'
 import {
   C2S_CancelMatch,
@@ -101,6 +102,12 @@ export const MsgId = {
   S2C_PhzSettle: 400009,
   S2C_PhzLiuJu: 400010,
   C2S_ClientTrace: 9001,
+} as const
+
+/** S2C_Kick.reason */
+export const KickReason = {
+  HeartbeatTimeout: 1,
+  LoggedInElsewhere: 2,
 } as const
 
 /** Four-digit game_id: msg_id = game_id * 100 + slot */
@@ -302,6 +309,11 @@ export function encodeC2S_PhzDiscard(tile: number): Uint8Array {
 
 export function encodeC2S_PhzAction(action: number, chiHand: number[] = []): Uint8Array {
   return enc(C2S_PhzAction, { action, chi_hand_tiles: chiHand })
+}
+
+export function decodeS2C_Kick(body: Uint8Array): { reason: number; message: string } {
+  const m = S2C_Kick.decode(body)
+  return { reason: m.reason, message: m.message }
 }
 
 export function decodeS2C_AuthResult(body: Uint8Array): { code: number; message: string; uid: number } {

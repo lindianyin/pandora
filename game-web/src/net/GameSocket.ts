@@ -44,6 +44,7 @@ import {
   decodeS2C_PhzLiuJu,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
+  decodeS2C_Kick,
   type LobbyTemplate,
   type RoomSeat,
   type HzmjGameStart,
@@ -55,7 +56,7 @@ import {
 export type GameHandlers = {
   onAuth?: (ok: boolean, uid: number, message: string) => void
   onHeartbeatAck?: () => void
-  onKick?: () => void
+  onKick?: (reason: number, message: string) => void
   onClose?: () => void
   onLog?: (line: string) => void
   onLobby?: (info: { templates: LobbyTemplate[]; gold: number; diamond: number }) => void
@@ -233,8 +234,10 @@ export class GameSocket {
       return
     }
     if (msgId === MsgId.S2C_Kick) {
-      this.log('Kicked')
-      this.handlers.onKick?.()
+      const k = decodeS2C_Kick(body)
+      this.log(`Kicked reason=${k.reason} ${k.message}`)
+      this.stopHb()
+      this.handlers.onKick?.(k.reason, k.message)
       return
     }
     if (msgId === MsgId.S2C_LobbyInfo) {
