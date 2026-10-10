@@ -5,6 +5,7 @@
 #include <common.pb.h>
 #include <game_ddz.pb.h>
 #include <game_hzmj.pb.h>
+#include <game_biji.pb.h>
 #include <game_fish.pb.h>
 #include <game_phz.pb.h>
 #include <lobby.pb.h>
@@ -597,6 +598,114 @@ std::vector<uint8_t> EncodeS2C_FishCatch(int64_t fish_id, int32_t type_id, int32
   m.set_uid(uid);
   m.set_reward(reward);
   m.set_gold(gold);
+  return Serialize(m);
+}
+
+bool DecodeC2S_BijiArrange(const uint8_t* data, size_t len, std::vector<int32_t>& head, std::vector<int32_t>& mid,
+                           std::vector<int32_t>& tail, bool& confirm) {
+  C2S_BijiArrange m;
+  if (!Parse(data, len, m)) return false;
+  head.assign(m.head().begin(), m.head().end());
+  mid.assign(m.mid().begin(), m.mid().end());
+  tail.assign(m.tail().begin(), m.tail().end());
+  confirm = m.confirm();
+  return true;
+}
+
+std::vector<uint8_t> EncodeS2C_BijiGameStart(const BijiGameStartData& data) {
+  S2C_BijiGameStart m;
+  m.set_round_id(data.round_id);
+  m.set_room_id(data.room_id);
+  m.set_template_id(data.template_id);
+  m.set_self_seat(data.self_seat);
+  m.set_players(data.players);
+  m.set_deal_start(data.deal_start);
+  m.set_base_score(data.base_score);
+  m.set_arrange_timeout_s(data.arrange_timeout_s);
+  for (auto c : data.hand) m.add_hand(c);
+  m.set_enable_chixi(data.enable_chixi);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_BijiArrangeState(const BijiArrangeStateData& data) {
+  S2C_BijiArrangeState m;
+  for (bool v : data.locked) m.add_locked(v);
+  for (bool v : data.trusteeship) m.add_trusteeship(v);
+  m.set_remain_s(data.remain_s);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_BijiArrangeAck(int32_t code, const std::string& message, bool locked) {
+  S2C_BijiArrangeAck m;
+  m.set_code(code);
+  m.set_message(message);
+  m.set_locked(locked);
+  return Serialize(m);
+}
+
+namespace {
+
+void FillDun(::pandora::BijiDun* d, const BijiDunData& src) {
+  for (auto c : src.cards) d->add_cards(c);
+  d->set_type(src.type);
+  d->set_place(src.place);
+  d->set_delta(src.delta);
+}
+
+void FillCompareSeat(::pandora::BijiSeatCompare* s, const BijiSeatCompareData& src) {
+  s->set_seat_id(src.seat_id);
+  s->set_uid(src.uid);
+  FillDun(s->mutable_head(), src.head);
+  FillDun(s->mutable_mid(), src.mid);
+  FillDun(s->mutable_tail(), src.tail);
+}
+
+void FillSettleSeat(::pandora::BijiSeatSettle* s, const BijiSeatSettleData& src) {
+  s->set_seat_id(src.seat_id);
+  s->set_uid(src.uid);
+  s->set_dun_delta_head(src.dun_delta_head);
+  s->set_dun_delta_mid(src.dun_delta_mid);
+  s->set_dun_delta_tail(src.dun_delta_tail);
+  s->set_chixi_delta(src.chixi_delta);
+  s->set_gross(src.gross);
+  s->set_rake(src.rake);
+  s->set_net(src.net);
+  s->set_gold(src.gold);
+  for (const auto& c : src.chixi) {
+    auto* x = s->add_chixi();
+    x->set_type(c.type);
+    x->set_mult(c.mult);
+  }
+}
+
+}  // namespace
+
+std::vector<uint8_t> EncodeS2C_BijiCompare(const BijiCompareData& data) {
+  S2C_BijiCompare m;
+  m.set_round_id(data.round_id);
+  for (const auto& s : data.seats) FillCompareSeat(m.add_seats(), s);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_BijiSettle(const BijiSettleData& data) {
+  S2C_BijiSettle m;
+  m.set_round_id(data.round_id);
+  for (const auto& s : data.seats) FillSettleSeat(m.add_seats(), s);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_BijiSnapshot(const BijiSnapshotData& data) {
+  S2C_BijiSnapshot m;
+  m.set_phase(data.phase);
+  m.set_deal_start(data.deal_start);
+  m.set_remain_s(data.remain_s);
+  for (auto c : data.hand) m.add_hand(c);
+  for (auto c : data.draft_head) m.add_draft_head(c);
+  for (auto c : data.draft_mid) m.add_draft_mid(c);
+  for (auto c : data.draft_tail) m.add_draft_tail(c);
+  m.set_has_draft(data.has_draft);
+  m.set_locked(data.locked);
+  for (bool v : data.others_locked) m.add_others_locked(v);
   return Serialize(m);
 }
 

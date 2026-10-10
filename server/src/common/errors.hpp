@@ -58,6 +58,13 @@ enum class Err : int32_t {
   kFishBadLock = 5000005,
   kFishDupSeq = 5000006,
 
+  kBijiIllegalArrange = 6000001,
+  kBijiDaoShui = 6000002,
+  kBijiAlreadyLocked = 6000003,
+  kBijiBadPhase = 6000004,
+  kBijiBadSeat = 6000005,
+  kBijiNotStarted = 6000006,
+
   kInternal = 90001,
 };
 
@@ -139,6 +146,18 @@ inline const char* ErrMessage(Err e) {
       return "illegal lock target";
     case Err::kFishDupSeq:
       return "duplicate fire seq";
+    case Err::kBijiIllegalArrange:
+      return "illegal arrange";
+    case Err::kBijiDaoShui:
+      return "dao shui";
+    case Err::kBijiAlreadyLocked:
+      return "already locked";
+    case Err::kBijiBadPhase:
+      return "bad phase";
+    case Err::kBijiBadSeat:
+      return "bad seat";
+    case Err::kBijiNotStarted:
+      return "not started";
     case Err::kInternal:
     default:
       return "internal error";
@@ -223,6 +242,16 @@ constexpr uint32_t kC2S_FishLeave = 500011;
 constexpr uint32_t kS2C_FishKickSeat = 500012;
 constexpr uint32_t kS2C_FishWave = 500013;
 constexpr uint32_t kC2S_FishLock = 500014;
+
+constexpr uint32_t kS2C_BijiGameStart = 600001;
+constexpr uint32_t kS2C_BijiArrangeState = 600002;
+constexpr uint32_t kC2S_BijiArrange = 600003;
+constexpr uint32_t kS2C_BijiArrangeAck = 600004;
+constexpr uint32_t kS2C_BijiCompare = 600005;
+constexpr uint32_t kS2C_BijiSettle = 600006;
+constexpr uint32_t kS2C_BijiSnapshot = 600007;
+constexpr uint32_t kC2S_BijiReady = 600008;
+constexpr uint32_t kC2S_BijiLeave = 600009;
 
 constexpr uint32_t kC2S_ClientTrace = 9001;
 }  // namespace MsgId

@@ -60,6 +60,17 @@ const router = createRouter({
       component: () => import('./views/FishLabView.vue'),
     },
     {
+      path: '/biji',
+      name: 'biji',
+      component: () => import('./views/BijiTableView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/biji-lab',
+      name: 'biji-lab',
+      component: () => import('./views/BijiLabView.vue'),
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),

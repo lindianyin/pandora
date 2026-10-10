@@ -19,6 +19,7 @@ import {
   encodeC2S_FishFire,
   encodeC2S_FishSetMult,
   encodeC2S_FishLeave,
+  encodeC2S_BijiArrange,
   encodeC2S_ClientTrace,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
@@ -52,6 +53,12 @@ import {
   decodeS2C_FishFireBroadcast,
   decodeS2C_FishHit,
   decodeS2C_FishCatch,
+  decodeS2C_BijiGameStart,
+  decodeS2C_BijiArrangeState,
+  decodeS2C_BijiArrangeAck,
+  decodeS2C_BijiCompare,
+  decodeS2C_BijiSettle,
+  decodeS2C_BijiSnapshot,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
   decodeS2C_Kick,
@@ -64,6 +71,9 @@ import {
   type FishGameStart,
   type FishSeatInfo,
   type FishSnap,
+  type BijiGameStart,
+  type BijiArrangeState,
+  type BijiSeatSettle,
 } from './frame'
 
 export type GameHandlers = {
@@ -176,6 +186,12 @@ export type GameHandlers = {
     reward: number
     gold: number
   }) => void
+  onBijiGameStart?: (s: BijiGameStart) => void
+  onBijiArrangeState?: (s: BijiArrangeState) => void
+  onBijiArrangeAck?: (s: { code: number; message: string; locked: boolean }) => void
+  onBijiCompare?: (s: ReturnType<typeof decodeS2C_BijiCompare>) => void
+  onBijiSettle?: (s: { round_id: number; seats: BijiSeatSettle[] }) => void
+  onBijiSnapshot?: (s: ReturnType<typeof decodeS2C_BijiSnapshot>) => void
 }
 
 export class GameSocket {
@@ -262,6 +278,10 @@ export class GameSocket {
   }
   fishLeave() {
     this.send(MsgId.C2S_FishLeave, encodeC2S_FishLeave())
+  }
+
+  bijiArrange(head: number[], mid: number[], tail: number[], confirm: boolean) {
+    this.send(MsgId.C2S_BijiArrange, encodeC2S_BijiArrange(head, mid, tail, confirm))
   }
   trace(roundId: number, seatId: number, game: string, event: string, detail: string) {
     if (roundId <= 0) return
@@ -440,6 +460,34 @@ export class GameSocket {
       const r = decodeS2C_FishCatch(body)
       this.log(`FishCatch fish=${r.fish_id} reward=${r.reward}`)
       this.handlers.onFishCatch?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_BijiGameStart) {
+      const r = decodeS2C_BijiGameStart(body)
+      this.log(`BijiStart seat=${r.self_seat} hand=${r.hand.length}`)
+      this.handlers.onBijiGameStart?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_BijiArrangeState) {
+      this.handlers.onBijiArrangeState?.(decodeS2C_BijiArrangeState(body))
+      return
+    }
+    if (msgId === MsgId.S2C_BijiArrangeAck) {
+      this.handlers.onBijiArrangeAck?.(decodeS2C_BijiArrangeAck(body))
+      return
+    }
+    if (msgId === MsgId.S2C_BijiCompare) {
+      this.handlers.onBijiCompare?.(decodeS2C_BijiCompare(body))
+      return
+    }
+    if (msgId === MsgId.S2C_BijiSettle) {
+      const r = decodeS2C_BijiSettle(body)
+      this.log(`BijiSettle seats=${r.seats.length}`)
+      this.handlers.onBijiSettle?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_BijiSnapshot) {
+      this.handlers.onBijiSnapshot?.(decodeS2C_BijiSnapshot(body))
       return
     }
     if (msgId === MsgId.S2C_ActivityUpdate) {

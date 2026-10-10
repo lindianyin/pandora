@@ -66,6 +66,15 @@ import {
   S2C_FishSeatUpdate,
   S2C_FishSpawn,
 } from '../gen/game_fish'
+import {
+  C2S_BijiArrange,
+  S2C_BijiArrangeAck,
+  S2C_BijiArrangeState,
+  S2C_BijiCompare,
+  S2C_BijiGameStart,
+  S2C_BijiSettle,
+  S2C_BijiSnapshot,
+} from '../gen/game_biji'
 import { S2C_ActivityUpdate } from '../gen/activity'
 
 export const MsgId = {
@@ -127,6 +136,15 @@ export const MsgId = {
   S2C_FishKickSeat: 500012,
   S2C_FishWave: 500013,
   C2S_FishLock: 500014,
+  S2C_BijiGameStart: 600001,
+  S2C_BijiArrangeState: 600002,
+  C2S_BijiArrange: 600003,
+  S2C_BijiArrangeAck: 600004,
+  S2C_BijiCompare: 600005,
+  S2C_BijiSettle: 600006,
+  S2C_BijiSnapshot: 600007,
+  C2S_BijiReady: 600008,
+  C2S_BijiLeave: 600009,
   C2S_ClientTrace: 9001,
 } as const
 
@@ -142,6 +160,7 @@ export const GameId = {
   Hzmj: 3000,
   Phz: 4000,
   Fish: 5000,
+  Biji: 6000,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {
@@ -904,3 +923,139 @@ export function decodeS2C_FishCatch(body: Uint8Array): {
     gold: m.gold,
   }
 }
+
+export type BijiGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  self_seat: number
+  players: number
+  deal_start: number
+  base_score: number
+  arrange_timeout_s: number
+  hand: number[]
+  enable_chixi: boolean
+}
+
+export type BijiArrangeState = {
+  locked: boolean[]
+  trusteeship: boolean[]
+  remain_s: number
+}
+
+export type BijiSeatSettle = {
+  seat_id: number
+  uid: number
+  dun_delta_head: number
+  dun_delta_mid: number
+  dun_delta_tail: number
+  chixi_delta: number
+  gross: number
+  rake: number
+  net: number
+  gold: number
+}
+
+export function encodeC2S_BijiArrange(
+  head: number[],
+  mid: number[],
+  tail: number[],
+  confirm: boolean,
+): Uint8Array {
+  return C2S_BijiArrange.encode({ head, mid, tail, confirm }).finish()
+}
+
+export function decodeS2C_BijiGameStart(body: Uint8Array): BijiGameStart {
+  const m = S2C_BijiGameStart.decode(body)
+  return {
+    round_id: m.round_id,
+    room_id: m.room_id,
+    template_id: m.template_id,
+    self_seat: m.self_seat,
+    players: m.players,
+    deal_start: m.deal_start,
+    base_score: m.base_score,
+    arrange_timeout_s: m.arrange_timeout_s,
+    hand: [...m.hand],
+    enable_chixi: m.enable_chixi,
+  }
+}
+
+export function decodeS2C_BijiArrangeState(body: Uint8Array): BijiArrangeState {
+  const m = S2C_BijiArrangeState.decode(body)
+  return { locked: [...m.locked], trusteeship: [...m.trusteeship], remain_s: m.remain_s }
+}
+
+export function decodeS2C_BijiArrangeAck(body: Uint8Array): {
+  code: number
+  message: string
+  locked: boolean
+} {
+  const m = S2C_BijiArrangeAck.decode(body)
+  return { code: m.code, message: m.message, locked: m.locked }
+}
+
+export function decodeS2C_BijiCompare(body: Uint8Array) {
+  return S2C_BijiCompare.decode(body)
+}
+
+export function decodeS2C_BijiSettle(body: Uint8Array): {
+  round_id: number
+  seats: BijiSeatSettle[]
+} {
+  const m = S2C_BijiSettle.decode(body)
+  return {
+    round_id: m.round_id,
+    seats: m.seats.map((s) => ({
+      seat_id: s.seat_id,
+      uid: s.uid,
+      dun_delta_head: s.dun_delta_head,
+      dun_delta_mid: s.dun_delta_mid,
+      dun_delta_tail: s.dun_delta_tail,
+      chixi_delta: s.chixi_delta,
+      gross: s.gross,
+      rake: s.rake,
+      net: s.net,
+      gold: s.gold,
+    })),
+  }
+}
+
+export function decodeS2C_BijiSnapshot(body: Uint8Array) {
+  return S2C_BijiSnapshot.decode(body)
+}
+
+/** Poker CardId label: suit*13+rank */
+export function bijiCardLabel(id: number): string {
+  const suits = ['D', 'C', 'H', 'S']
+  const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
+  const suit = Math.floor(id / 13)
+  const rank = id % 13
+  return `${suits[suit] ?? '?'}${ranks[rank] ?? '?'}`
+}
+
+export type BijiCardFace = {
+  id: number
+  rank: string
+  suit: string
+  red: boolean
+  label: string
+}
+
+/** Display face for UI: ♦♣♥♠ + rank */
+export function bijiCardFace(id: number): BijiCardFace {
+  const suits = ['♦', '♣', '♥', '♠']
+  const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+  const suit = Math.floor(id / 13)
+  const rank = id % 13
+  const red = suit === 0 || suit === 2
+  return {
+    id,
+    rank: ranks[rank] ?? '?',
+    suit: suits[suit] ?? '?',
+    red,
+    label: bijiCardLabel(id),
+  }
+}
+
+export const BIJI_DUN_TYPE_LABELS = ['散牌', '对子', '顺子', '同花', '同花顺', '三条'] as const

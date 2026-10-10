@@ -8,7 +8,8 @@ const wide = computed(
     route.path === '/hzmj-lab' ||
     route.path === '/ddz-lab' ||
     route.path === '/phz-lab' ||
-    route.path === '/fish-lab',
+    route.path === '/fish-lab' ||
+    route.path === '/biji-lab',
 )
 </script>
 
@@ -31,7 +32,7 @@ const wide = computed(
 }
 body { margin: 0; }
 .page { max-width: 900px; margin: 0 auto; padding: 24px; }
-.page.wide { max-width: 1480px; padding: 12px 16px; }
+.page.wide { max-width: 1560px; padding: 12px 16px; }
 header h1 { margin: 0 0 8px; font-size: 1.5rem; }
 .sub { margin: 0 0 20px; color: #666; }
 </style>

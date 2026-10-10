@@ -1,5 +1,6 @@
 #include "game/game_registry.hpp"
 
+#include "game/biji/biji_room_game.hpp"
 #include "game/ddz/ddz_room_game.hpp"
 #include "game/fish/fish_room_game.hpp"
 #include "game/hzmj/hzmj_room_game.hpp"
@@ -17,6 +18,8 @@ void RegisterBuiltinGames() {
                 [](RoomCtx& ctx) { return std::make_unique<PhzRoomGame>(ctx); }});
   reg.Register({GameId::kFish, "fish", 4,
                 [](RoomCtx& ctx) { return std::make_unique<FishRoomGame>(ctx); }});
+  reg.Register({GameId::kBiji, "biji", 4,
+                [](RoomCtx& ctx) { return std::make_unique<BijiRoomGame>(ctx); }});
 }
 
 }  // namespace pandora

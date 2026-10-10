@@ -179,5 +179,91 @@ std::vector<uint8_t> EncodeS2C_FishHit(int64_t bullet_id, int64_t fish_id, int32
 std::vector<uint8_t> EncodeS2C_FishCatch(int64_t fish_id, int32_t type_id, int32_t seat_id, int64_t uid, int64_t reward,
                                          int64_t gold);
 
+struct BijiGameStartData {
+  int64_t round_id{0};
+  int64_t room_id{0};
+  int32_t template_id{0};
+  int32_t self_seat{0};
+  int32_t players{4};
+  int32_t deal_start{0};
+  int32_t base_score{100};
+  int32_t arrange_timeout_s{45};
+  std::vector<int32_t> hand;
+  bool enable_chixi{true};
+};
+
+struct BijiArrangeStateData {
+  std::vector<bool> locked;
+  std::vector<bool> trusteeship;
+  int32_t remain_s{0};
+};
+
+struct BijiDunData {
+  std::vector<int32_t> cards;
+  int32_t type{0};
+  int32_t place{0};
+  int64_t delta{0};
+};
+
+struct BijiSeatCompareData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  BijiDunData head;
+  BijiDunData mid;
+  BijiDunData tail;
+};
+
+struct BijiChixiData {
+  int32_t type{0};
+  int32_t mult{0};
+};
+
+struct BijiSeatSettleData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  int64_t dun_delta_head{0};
+  int64_t dun_delta_mid{0};
+  int64_t dun_delta_tail{0};
+  int64_t chixi_delta{0};
+  int64_t gross{0};
+  int64_t rake{0};
+  int64_t net{0};
+  int64_t gold{0};
+  std::vector<BijiChixiData> chixi;
+};
+
+struct BijiCompareData {
+  int64_t round_id{0};
+  std::vector<BijiSeatCompareData> seats;
+};
+
+struct BijiSettleData {
+  int64_t round_id{0};
+  std::vector<BijiSeatSettleData> seats;
+};
+
+struct BijiSnapshotData {
+  int32_t phase{0};
+  int32_t deal_start{0};
+  int32_t remain_s{0};
+  std::vector<int32_t> hand;
+  std::vector<int32_t> draft_head;
+  std::vector<int32_t> draft_mid;
+  std::vector<int32_t> draft_tail;
+  bool has_draft{false};
+  bool locked{false};
+  std::vector<bool> others_locked;
+};
+
+bool DecodeC2S_BijiArrange(const uint8_t* data, size_t len, std::vector<int32_t>& head, std::vector<int32_t>& mid,
+                           std::vector<int32_t>& tail, bool& confirm);
+
+std::vector<uint8_t> EncodeS2C_BijiGameStart(const BijiGameStartData& data);
+std::vector<uint8_t> EncodeS2C_BijiArrangeState(const BijiArrangeStateData& data);
+std::vector<uint8_t> EncodeS2C_BijiArrangeAck(int32_t code, const std::string& message, bool locked);
+std::vector<uint8_t> EncodeS2C_BijiCompare(const BijiCompareData& data);
+std::vector<uint8_t> EncodeS2C_BijiSettle(const BijiSettleData& data);
+std::vector<uint8_t> EncodeS2C_BijiSnapshot(const BijiSnapshotData& data);
+
 }  // namespace proto_wire
 }  // namespace pandora

@@ -2,7 +2,7 @@
 
 棋牌游戏单体服务端（C++）+ Vue 网页客户端 + 运营后台。平台里程碑：**M6**（IOCP、报表、压测）。玩法：斗地主经典简单规则，以及杭州麻将（白板固定财神）。
 
-需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。杭州麻将以 `docs/杭州麻将-SPEC.md` 为准，规则说明见 `docs/杭州麻将规则.md`。跑胡子以 `docs/跑胡子-SPEC.md` 为准，规则说明见 `docs/跑胡子规则.md`。
+需求冲突时以 `docs/棋牌游戏服务端-需求文档.md`（SRS）为准，技术实现以 `docs/棋牌游戏服务端-SPEC.md` 为准。杭州麻将以 `docs/杭州麻将-SPEC.md` 为准，规则说明见 `docs/杭州麻将规则.md`。跑胡子以 `docs/跑胡子-SPEC.md` 为准，规则说明见 `docs/跑胡子规则.md`。比鸡以 `docs/比鸡游戏-SPEC.md` 为准，需求见 `docs/比鸡游戏-需求文档.md`。
 
 ## 硬约束（不可偏离）
 
@@ -21,15 +21,15 @@ proto/                # 唯一协议契约（.proto）
 server/               # C++ pandora-server（MSVC / CMake）
   src/net/            # HTTP、WSS、帧、SessionHub、IOCP
   src/auth/ lobby/ match/ room/ game/
-  src/game/           # GameRegistry + IRoomGame；game_id 2000/3000/4000/5000
-  src/game/ddz|hzmj|phz|fish/  # 规则 Table + *_room_game 适配器
+  src/game/           # GameRegistry + IRoomGame；game_id 2000/3000/4000/5000/6000
+  src/game/ddz|hzmj|phz|fish|biji/  # 规则 Table + *_room_game 适配器
   src/wallet/ pay/ activity/ admin/ social/ bag/
   src/store/          # MysqlClient、RedisClient、MemoryStore
   conf/               # server.json / server.tls.json
   sql/                # schema.sql
   scripts/            # build.ps1、*_smoke.mjs、ccu_load.mjs
-  tests/              # hzmj_*_test、phz_*_test、fish_*_test、ddz_cards_test
-game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab /fish-lab
+  tests/              # hzmj_*_test、phz_*_test、fish_*_test、biji_*_test、ddz_cards_test
+game-web/             # Vue3；/hzmj-lab /ddz-lab /phz-lab /fish-lab /biji-lab
 admin-web/            # Vue3 + Element Plus 运营后台（端口 5174）
 docker-compose.yml    # MySQL 5.7 + Redis 6.2
 ```
@@ -39,7 +39,7 @@ docker-compose.yml    # MySQL 5.7 + Redis 6.2
 命名空间：`pandora`。日志宏：`PLOG_INFO` / `PLOG_WARN` / `PLOG_ERROR`。对局轨迹用 `LogRound`（`server/src/common/log.hpp`），行格式：
 
 ```text
-round=<局号> src=server|client game=hzmj|ddz|phz|fish room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
+round=<局号> src=server|client game=hzmj|ddz|phz|fish|biji room=<房间> uid=<玩家> seat=<座位> ev=<事件> <detail>
 ```
 
 文件在进程工作目录 `logs/pandora_YYYY-MM-DD.log`（从 `server/` 启动即为 `server/logs/`）。客户端经 `C2S_ClientTrace`（9001）上报，服务端用 `RoomOf(uid)` 填房间号。座位类事件的 `uid` 取该座位玩家。
@@ -73,6 +73,7 @@ node server\scripts\activity_smoke.mjs
 node server\scripts\hzmj_smoke.mjs
 node server\scripts\phz_smoke.mjs
 node server\scripts\fish_smoke.mjs
+node server\scripts\biji_smoke.mjs
 node server\scripts\ccu_load.mjs --target 200
 ```
 
@@ -85,10 +86,14 @@ cmake --build server\build --config Release --target phz_table_test
 cmake --build server\build --config Release --target phz_rules_test
 cmake --build server\build --config Release --target fish_math_test
 cmake --build server\build --config Release --target fish_table_test
+cmake --build server\build --config Release --target biji_hand_test
+cmake --build server\build --config Release --target biji_table_test
 server\build\Release\hzmj_table_test.exe
 server\build\Release\phz_table_test.exe
 server\build\Release\fish_math_test.exe
 server\build\Release\fish_table_test.exe
+server\build\Release\biji_hand_test.exe
+server\build\Release\biji_table_test.exe
 cd game-web
 npm test
 ```
@@ -171,6 +176,9 @@ Admin 默认超管：`admin` / `admin123`。
 | `docs/杭州麻将规则.md` | 玩法说明（白板财神、爆头、三牢点炮） |
 | `docs/跑胡子-SPEC.md` | 跑胡子协议、状态机、偎跑提、囤番结算 |
 | `docs/跑胡子规则.md` | 跑胡子玩法说明（湖南经典默认档） |
+| `docs/捕鱼游戏-SPEC.md` | 捕鱼协议、公式、TDD |
+| `docs/比鸡游戏-需求文档.md` | 比鸡需求（SRS） |
+| `docs/比鸡游戏-SPEC.md` | 比鸡协议、牌型、结算、TDD |
 | `docs/棋牌游戏服务端-M1计划.md` … `M6计划.md` | 里程碑范围与验收 |
 | `README.md` | 本地启动与冒烟入口 |
 

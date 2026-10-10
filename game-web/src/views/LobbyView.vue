@@ -46,6 +46,7 @@ onMounted(() => {
       <button class="ghost" @click="router.push('/ddz-lab')">斗地主三联调试</button>
       <button class="ghost" @click="router.push('/phz-lab')">跑胡子三联调试</button>
       <button class="ghost" @click="router.push('/fish-lab')">捕鱼双联调试</button>
+      <button class="ghost" @click="router.push('/biji-lab')">比鸡四联调试</button>
     </div>
   </section>
 
@@ -77,7 +78,9 @@ onMounted(() => {
                 ? '跑胡子'
                 : t.game_id === 5000 || t.game_id === 4
                   ? '捕鱼'
-                  : '斗地主'
+                  : t.game_id === 6000 || t.game_id === 5
+                    ? '比鸡'
+                    : '斗地主'
           }}
           ·
           {{

@@ -14,6 +14,7 @@ int32_t NormalizeTemplateGameId(int32_t game_id) {
   if (game_id == 2) return GameId::kHzmj;
   if (game_id == 3) return GameId::kPhz;
   if (game_id == 4) return GameId::kFish;
+  if (game_id == 5) return GameId::kBiji;
   if (game_id < GameId::kMin) return GameId::kDdz;
   return game_id;
 }
@@ -84,6 +85,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
   bool has_hzmj = false;
   bool has_phz = false;
   bool has_fish = false;
+  bool has_biji = false;
   for (const auto& row : *rows) {
     proto_wire::LobbyTemplate t;
     t.id = row.Int("id");
@@ -104,6 +106,7 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
     if (t.game_id == GameId::kHzmj) has_hzmj = true;
     if (t.game_id == GameId::kPhz) has_phz = true;
     if (t.game_id == GameId::kFish) has_fish = true;
+    if (t.game_id == GameId::kBiji) has_biji = true;
   }
   if (!has_hzmj) {
     proto_wire::LobbyTemplate hz;
@@ -159,6 +162,24 @@ void LobbyService::ReloadFromDb(MysqlClient& mysql) {
         {I64(4), I64(GameId::kFish), Str(fish.name), I64(fish.base_score), I64(cfg_.rake_bp), I64(fish.min_gold),
          I64(fish.max_gold)});
   }
+  if (!has_biji) {
+    proto_wire::LobbyTemplate biji;
+    biji.id = 5;
+    biji.name = "BijiNovice";
+    biji.base_score = cfg_.base_score;
+    biji.min_gold = cfg_.min_gold;
+    biji.max_gold = cfg_.max_gold;
+    biji.enabled = true;
+    biji.game_id = GameId::kBiji;
+    biji.players = MatchPlayersFor(GameId::kBiji);
+    templates_.push_back(biji);
+    rake_bp_[5] = cfg_.rake_bp;
+    mysql.ExecBind(
+        "INSERT INTO room_template(id,game_id,name,base_score,rake_bp,min_gold,max_gold,enabled) "
+        "VALUES(?,?,?,?,?,?,?,1) ON DUPLICATE KEY UPDATE game_id=VALUES(game_id)",
+        {I64(5), I64(GameId::kBiji), Str(biji.name), I64(biji.base_score), I64(cfg_.rake_bp), I64(biji.min_gold),
+         I64(biji.max_gold)});
+  }
   PLOG_INFO("lobby templates reloaded count=" << templates_.size());
 }
 
@@ -186,6 +207,7 @@ void LobbyService::UpsertTemplate(int id, const std::string& name, int base_scor
   t.game_id = (id == 2)   ? GameId::kHzmj
               : (id == 3) ? GameId::kPhz
               : (id == 4) ? GameId::kFish
+              : (id == 5) ? GameId::kBiji
                           : GameId::kDdz;
   t.players = MatchPlayersFor(t.game_id);
   templates_.push_back(t);
