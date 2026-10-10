@@ -521,6 +521,38 @@ export function cardLabel(card: number): string {
   return suits[Math.floor(card / 13) % 4]! + ranks[card % 13]!
 }
 
+export type DdzCardFace = {
+  id: number
+  rank: string
+  suit: string
+  red: boolean
+  joker: boolean
+  label: string
+}
+
+/** Poker-style face for DDZ UI (♠♥♣♦). */
+export function ddzCardFace(card: number): DdzCardFace {
+  if (card === 52) {
+    return { id: card, rank: 'JOKER', suit: '🃏', red: false, joker: true, label: '小王' }
+  }
+  if (card === 53) {
+    return { id: card, rank: 'JOKER', suit: '🃏', red: true, joker: true, label: '大王' }
+  }
+  const ranks = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2']
+  const suits = ['♠', '♥', '♣', '♦']
+  const suit = Math.floor(card / 13) % 4
+  const rank = card % 13
+  const red = suit === 1 || suit === 3
+  return {
+    id: card,
+    rank: ranks[rank] ?? '?',
+    suit: suits[suit] ?? '?',
+    red,
+    joker: false,
+    label: cardLabel(card),
+  }
+}
+
 /** DDZ card sort: by card id rank within suit encoding (c%13), jokers last */
 export function sortDdzHand(cards: number[]): number[] {
   const rankKey = (c: number) => (c >= 52 ? 100 + (c - 52) : c % 13)
@@ -542,6 +574,32 @@ export function tileLabel(tile: number): string {
   if (tile <= 30) return winds[tile - 27]!
   const dragons = ['中', '发', '白']
   return dragons[tile - 31]!
+}
+
+export type HzmjTileFace = {
+  id: number
+  num: string
+  kind: string
+  suit: 'wan' | 'tiao' | 'tong' | 'zi'
+  label: string
+}
+
+/** Split label for mahjong tile UI. */
+export function hzmjTileFace(tile: number): HzmjTileFace {
+  if (tile < 0 || tile > 33) {
+    return { id: tile, num: '?', kind: '', suit: 'zi', label: '?' }
+  }
+  if (tile <= 8) {
+    return { id: tile, num: String(tile + 1), kind: '万', suit: 'wan', label: tileLabel(tile) }
+  }
+  if (tile <= 17) {
+    return { id: tile, num: String(tile - 8), kind: '条', suit: 'tiao', label: tileLabel(tile) }
+  }
+  if (tile <= 26) {
+    return { id: tile, num: String(tile - 17), kind: '筒', suit: 'tong', label: tileLabel(tile) }
+  }
+  const text = tileLabel(tile)
+  return { id: tile, num: text, kind: '', suit: 'zi', label: text }
 }
 
 export function decodeS2C_HzmjGameStart(body: Uint8Array): HzmjGameStart {
@@ -743,6 +801,29 @@ export type FishSeatInfo = {
   cannon_mult: number
   online: boolean
   gold: number
+  /** Max accepted fire client_seq on this seat (for reconnect resume). */
+  last_client_seq: number
+}
+
+/** Same as server fish::kSeatCannonPos (origin bottom-left). 0/1 bottom, 2/3 top. */
+export const FISH_SEAT_CANNON_POS: ReadonlyArray<{ x: number; y: number }> = [
+  { x: 420, y: 70 },
+  { x: 1500, y: 70 },
+  { x: 420, y: 1050 },
+  { x: 1500, y: 1050 },
+]
+
+export function fishSeatIsTop(seat: number): boolean {
+  return seat === 2 || seat === 3
+}
+
+/** Barrel angle in degrees; 0 = straight up (CSS rotate). */
+export function fishCannonAngle(cx: number, cy: number, aimX: number, aimY: number): number {
+  return (Math.atan2(aimX - cx, aimY - cy) * 180) / Math.PI
+}
+
+export function fishCannonAngleFromVel(vx: number, vy: number): number {
+  return (Math.atan2(vx, vy) * 180) / Math.PI
 }
 
 export type FishSnap = {
@@ -755,6 +836,29 @@ export type FishSnap = {
   radius: number
   hp: number
   hp_max: number
+}
+
+export type FishVisual = {
+  typeId: number
+  label: string
+  cls: string
+  size: number
+}
+
+/** Display helper for fish pond UI (type color / size). */
+export function fishVisual(typeId: number, radius = 30): FishVisual {
+  const map: Record<number, { label: string; cls: string }> = {
+    1: { label: '小鱼', cls: 't1' },
+    2: { label: '中鱼', cls: 't2' },
+    3: { label: '铁甲', cls: 't3' },
+  }
+  const m = map[typeId] ?? { label: `鱼${typeId}`, cls: 't0' }
+  return {
+    typeId,
+    label: m.label,
+    cls: m.cls,
+    size: Math.max(22, Math.min(78, Math.round(radius * 0.95))),
+  }
 }
 
 export type FishGameStart = {
@@ -809,6 +913,7 @@ export function decodeS2C_FishGameStart(body: Uint8Array): FishGameStart {
       cannon_mult: s.cannon_mult,
       online: s.online,
       gold: s.gold,
+      last_client_seq: Number(s.last_client_seq || 0),
     })),
     fish: m.fish.map((f) => ({
       fish_id: f.fish_id,
@@ -836,6 +941,7 @@ export function decodeS2C_FishSeatUpdate(body: Uint8Array): FishSeatInfo | null 
     cannon_mult: s.cannon_mult,
     online: s.online,
     gold: s.gold,
+    last_client_seq: Number(s.last_client_seq || 0),
   }
 }
 

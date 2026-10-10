@@ -14,6 +14,8 @@ export interface FishSeatInfo {
   cannon_mult: number;
   online: boolean;
   gold: number;
+  /** Max accepted C2S_FishFire.client_seq for this seat (reconnect resume). */
+  last_client_seq: number;
 }
 
 export interface FishSnapshot {
@@ -132,7 +134,7 @@ export interface C2S_FishLock {
 }
 
 function createBaseFishSeatInfo(): FishSeatInfo {
-  return { seat_id: 0, uid: 0, nickname: "", cannon_mult: 0, online: false, gold: 0 };
+  return { seat_id: 0, uid: 0, nickname: "", cannon_mult: 0, online: false, gold: 0, last_client_seq: 0 };
 }
 
 export const FishSeatInfo: MessageFns<FishSeatInfo> = {
@@ -154,6 +156,9 @@ export const FishSeatInfo: MessageFns<FishSeatInfo> = {
     }
     if (message.gold !== 0) {
       writer.uint32(48).int64(message.gold);
+    }
+    if (message.last_client_seq !== 0) {
+      writer.uint32(56).int64(message.last_client_seq);
     }
     return writer;
   },
@@ -219,6 +224,14 @@ export const FishSeatInfo: MessageFns<FishSeatInfo> = {
             message.gold = longToNumber(reader.int64());
             continue;
           }
+          case 7: {
+            if (tag !== 56) {
+              break;
+            }
+
+            message.last_client_seq = longToNumber(reader.int64());
+            continue;
+          }
         }
         if ((tag & 7) === 4 || tag === 0) {
           break;
@@ -247,6 +260,11 @@ export const FishSeatInfo: MessageFns<FishSeatInfo> = {
         : 0,
       online: isSet(object.online) ? globalThis.Boolean(object.online) : false,
       gold: isSet(object.gold) ? globalThis.Number(object.gold) : 0,
+      last_client_seq: isSet(object.lastClientSeq)
+        ? globalThis.Number(object.lastClientSeq)
+        : isSet(object.last_client_seq)
+        ? globalThis.Number(object.last_client_seq)
+        : 0,
     };
   },
 
@@ -270,6 +288,9 @@ export const FishSeatInfo: MessageFns<FishSeatInfo> = {
     if (message.gold !== 0) {
       obj.gold = Math.round(message.gold);
     }
+    if (message.last_client_seq !== 0) {
+      obj.lastClientSeq = Math.round(message.last_client_seq);
+    }
     return obj;
   },
 
@@ -284,6 +305,7 @@ export const FishSeatInfo: MessageFns<FishSeatInfo> = {
     message.cannon_mult = object.cannon_mult ?? 0;
     message.online = object.online ?? false;
     message.gold = object.gold ?? 0;
+    message.last_client_seq = object.last_client_seq ?? 0;
     return message;
   },
 };

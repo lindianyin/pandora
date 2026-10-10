@@ -293,9 +293,16 @@ export function createDdzLabClient(slot: number, deviceId: string) {
   }
 
   function leave() {
+    if (matching.value) {
+      sock?.cancelMatch()
+      matching.value = false
+      matchMsg.value = ''
+    }
     sock?.leaveRoom()
     roomId.value = 0
+    roomPhase.value = ''
     turnPhase.value = ''
+    ddzRoundId.value = 0
     hand.value = []
     selected.value = []
     bottom.value = []

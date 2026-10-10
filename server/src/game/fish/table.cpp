@@ -149,7 +149,10 @@ bool FishTable::TryFire(const FireRequest& req, FireCostPlan* cost) {
   bullets_.push_back(b);
 
   s.last_fire_ms = now_ms_;
-  if (req.client_seq > 0) s.seen_seq.insert(req.client_seq);
+  if (req.client_seq > 0) {
+    s.seen_seq.insert(req.client_seq);
+    if (req.client_seq > s.max_client_seq) s.max_client_seq = req.client_seq;
+  }
   s.mult = req.mult;
 
   cost->uid = s.uid;

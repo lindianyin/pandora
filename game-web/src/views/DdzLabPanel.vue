@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount } from 'vue'
 import { createDdzLabClient } from '../composables/createDdzLabClient'
+import { ddzCardFace } from '../net/frame'
 
 const props = defineProps<{ slotIndex: number; deviceId: string }>()
 const c = createDdzLabClient(props.slotIndex, props.deviceId)
 
-/** Table position: seat0 bottom, seat1 right, seat2 top */
 const tablePos = computed(() => {
   const seat = c.mySeat.value >= 0 ? c.mySeat.value : props.slotIndex
   return Math.min(2, Math.max(0, seat))
@@ -18,22 +18,27 @@ defineExpose({
   login: () => c.login(),
   matchDdz: () => c.matchDdz(),
   doReady: () => c.doReady(),
+  leave: () => c.leave(),
   get wsOk() {
     return c.wsOk.value
   },
   get roomId() {
     return c.roomId.value
   },
+  get matching() {
+    return c.matching.value
+  },
 })
+
+function face(id: number) {
+  return ddzCardFace(id)
+}
 </script>
 
 <template>
   <section
     class="panel"
-    :class="[
-      `pos-s${tablePos}`,
-      { active: c.isBidTurn.value || c.isPlayTurn.value },
-    ]"
+    :class="[`pos-s${tablePos}`, { active: c.isBidTurn.value || c.isPlayTurn.value }]"
   >
     <div class="ph">
       <strong>{{ c.label }}</strong>
@@ -50,7 +55,7 @@ defineExpose({
     <div class="row">
       <button v-if="!c.wsOk.value" :disabled="c.busy.value" @click="c.login()">登录</button>
       <button v-else-if="!c.roomId.value" :disabled="c.matching.value" @click="c.matchDdz()">匹配</button>
-      <button v-if="c.canReady.value" :disabled="c.iAmReady.value" @click="c.doReady()">
+      <button v-if="c.canReady.value" class="primary" :disabled="c.iAmReady.value" @click="c.doReady()">
         {{ c.iAmReady.value ? 'OK' : '准备' }}
       </button>
       <button v-if="c.roomId.value" class="ghost" @click="c.leave()">离开</button>
@@ -62,7 +67,18 @@ defineExpose({
     </div>
 
     <div v-if="c.bottom.value.length" class="bottom">
-      底牌 {{ c.bottom.value.map(c.cardLabel).join(' ') }}
+      <span class="meta">底牌</span>
+      <button
+        v-for="card in c.bottom.value"
+        :key="'b' + card"
+        type="button"
+        class="pcard sm"
+        :class="{ red: face(card).red, joker: face(card).joker }"
+        disabled
+      >
+        <span class="rank">{{ face(card).joker ? (face(card).red ? '大' : '小') : face(card).rank }}</span>
+        <span class="suit">{{ face(card).joker ? '王' : face(card).suit }}</span>
+      </button>
     </div>
 
     <div class="seats">
@@ -74,7 +90,7 @@ defineExpose({
       >
         <div>
           {{ s.nickname }} 座{{ s.seat_id }} 剩{{ c.cardsLeft.value[s.seat_id] ?? '-' }}
-          <span v-if="c.landlordSeat.value >= 0 && s.seat_id === c.landlordSeat.value" class="tag mini-tag">地主</span>
+          <span v-if="c.landlordSeat.value >= 0 && s.seat_id === c.landlordSeat.value" class="tag">地主</span>
           <span v-if="s.trusteeship" class="trust">托管</span>
           <span v-else-if="!s.online" class="trust">离线</span>
         </div>
@@ -87,23 +103,25 @@ defineExpose({
       <button
         v-for="card in c.hand.value"
         :key="card + '-' + c.selected.value.includes(card)"
-        class="tile"
-        :class="{ on: c.selected.value.includes(card) }"
+        type="button"
+        class="pcard"
+        :class="{ on: c.selected.value.includes(card), red: face(card).red, joker: face(card).joker }"
         @click="c.toggleCard(card)"
       >
-        {{ c.cardLabel(card) }}
+        <span class="rank">{{ face(card).joker ? (face(card).red ? '大' : '小') : face(card).rank }}</span>
+        <span class="suit">{{ face(card).joker ? '王' : face(card).suit }}</span>
       </button>
     </div>
 
     <div class="row">
       <template v-if="c.isBidTurn.value">
         <button @click="c.doBid(0)">不叫</button>
-        <button @click="c.doBid(1)">1分</button>
-        <button @click="c.doBid(2)">2分</button>
-        <button @click="c.doBid(3)">3分</button>
+        <button class="primary" @click="c.doBid(1)">1分</button>
+        <button class="primary" @click="c.doBid(2)">2分</button>
+        <button class="primary" @click="c.doBid(3)">3分</button>
       </template>
       <template v-if="c.isPlayTurn.value">
-        <button :disabled="!c.selected.value.length" @click="c.doPlay()">出牌</button>
+        <button class="primary" :disabled="!c.selected.value.length" @click="c.doPlay()">出牌</button>
         <button @click="c.doPass()">过</button>
       </template>
     </div>
@@ -123,72 +141,112 @@ defineExpose({
 
 <style scoped>
 .panel {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 10px;
+  background: linear-gradient(160deg, #14523c 0%, #0f3d2e 45%, #0a2a20 100%);
+  color: #e8f2ec;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 12px;
   font-size: 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
 }
-.panel.active { box-shadow: 0 0 0 2px #f59e0b; }
+.panel.active { box-shadow: 0 0 0 2px #e8c547, 0 10px 24px rgba(0, 0, 0, 0.28); }
 .ph { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
 .pos {
-  background: #1d4ed8;
-  color: #fff;
+  background: #e8c547;
+  color: #2a2108;
   padding: 1px 7px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .dev {
-  color: #64748b;
+  color: #9db5a8;
   font-family: ui-monospace, Consolas, monospace;
-  max-width: 180px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.meta { color: #64748b; }
-.tag { background: #b45309; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
-.mini-tag { margin-left: 4px; }
-.trust { color: #c2410c; margin-left: 4px; }
-.err { background: #fef2f2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; margin-bottom: 6px; }
-.row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-.cd { background: #fef3c7; color: #b45309; padding: 4px 8px; border-radius: 999px; display: inline-block; margin-bottom: 6px; }
-.bottom { font-weight: 600; margin-bottom: 6px; }
-.seats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 6px; }
-.mini { border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 6px; background: #f8fafc; }
-.mini.me { border-color: #1d4ed8; background: #eff6ff; }
-.mini.turn { box-shadow: 0 0 0 1px #f59e0b; }
-.lp { min-height: 1em; font-weight: 600; margin-top: 2px; }
-.hand-label { color: #64748b; margin-top: 4px; }
-.hand { display: flex; flex-wrap: wrap; gap: 4px; min-height: 36px; }
-.tile {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
+.meta { color: #9db5a8; }
+.tag {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  padding: 1px 6px;
   border-radius: 4px;
-  padding: 4px 6px;
-  cursor: pointer;
-  color: #0f172a;
+  font-size: 11px;
+  font-weight: 700;
 }
-.tile.on { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+.trust { color: #ffb074; margin-left: 4px; }
+.err { background: rgba(185, 28, 28, 0.25); color: #ffb4b4; padding: 4px 8px; border-radius: 6px; margin-bottom: 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.cd {
+  background: rgba(232, 197, 71, 0.15);
+  color: #e8c547;
+  border: 1px solid rgba(232, 197, 71, 0.35);
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+.bottom { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 6px; }
+.seats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.mini {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.mini.me { border-color: rgba(232, 197, 71, 0.45); }
+.mini.turn { box-shadow: 0 0 0 1px #e8c547; }
+.lp { min-height: 1em; font-weight: 700; margin-top: 2px; }
+.hand-label { color: #9db5a8; margin-top: 4px; }
+.hand { display: flex; flex-wrap: wrap; gap: 5px; min-height: 52px; }
+.pcard {
+  width: 40px;
+  height: 56px;
+  border: 0;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #fffef8 0%, #f2efe6 100%);
+  color: #1a1a1a;
+  box-shadow: 0 2px 0 #c9c2b0, 0 4px 10px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  cursor: pointer;
+  padding: 0;
+}
+.pcard.sm { width: 32px; height: 44px; cursor: default; }
+.pcard.red { color: #c62828; }
+.pcard.joker { color: #1d4ed8; }
+.pcard.joker.red { color: #c62828; }
+.pcard.on { outline: 2px solid #e8c547; outline-offset: 1px; transform: translateY(-6px); }
+.pcard .rank { font-size: 12px; font-weight: 800; line-height: 1; }
+.pcard .suit { font-size: 14px; line-height: 1; }
 button {
   border: 0;
-  background: #1d4ed8;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8f2ec;
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
 }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost { background: #e2e8f0; color: #334155; }
-.settle { background: #eff6ff; padding: 6px; border-radius: 6px; margin-top: 6px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
+}
+button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); }
+.settle { background: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 6px; margin-top: 6px; }
 .log {
   margin: 8px 0 0;
   max-height: 90px;
   overflow: auto;
-  background: #0f172a;
-  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.28);
+  color: #b7cfc2;
   padding: 6px;
   border-radius: 6px;
   font-size: 10px;

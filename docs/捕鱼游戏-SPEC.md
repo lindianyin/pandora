@@ -117,7 +117,7 @@ node server\scripts\fish_smoke.mjs
 | 项 | 值 |
 |----|----|
 | 逻辑坐标系 | 原点左下；宽 `W=1920`，高 `H=1080`（逻辑单位，与像素可 1:1） |
-| 座位 | 0..3；炮口锚点固定（SPEC 常量数组 `kSeatCannonPos[4]`） |
+| 座位 | 0..3；炮口锚点 `kSeatCannonPos[4]`：0 下左 / 1 下右 / 2 上左 / 3 上右（420/1500 × 70/1050） |
 | Tick | 默认 `dt=50ms`（20 Hz），`room` 配置可改 |
 
 ### 3.2 鱼实例 `FishInst`
@@ -325,7 +325,7 @@ GameRegistry.Register(GameId::kFish=5000, "fish", default_seats=4, factory → F
 
 | slot | msg_id | 方向 | message | 说明 |
 |------|--------|------|---------|------|
-| 1 | 500001 | S→C | `S2C_FishGameStart` | round_id、room、座位、炮倍列表、场景种子/配置快照 |
+| 1 | 500001 | S→C | `S2C_FishGameStart` | round_id、room、座位（含 `last_client_seq`）、炮倍列表、场景种子/配置快照；重连复用本消息 |
 | 2 | 500002 | S→C | `S2C_FishSeatUpdate` | 座位在线、炮倍、昵称 |
 | 3 | 500003 | S→C | `S2C_FishSpawn` | 鱼出生批量 |
 | 4 | 500004 | S→C | `S2C_FishDespawn` | 离场/死亡（无奖或有奖见 Catch） |
@@ -354,6 +354,8 @@ GameRegistry.Register(GameId::kFish=5000, "fish", default_seats=4, factory → F
 | 5000006 | 重复 client_seq |
 
 走 `S2C_Error` + `ErrMessage`。
+
+重连：`S2C_FishGameStart` 座位字段 `last_client_seq` 为该座已接受的最大开火序号；客户端须从 `last_client_seq+1` 续发，禁止从 1 重计。
 
 ---
 

@@ -8,6 +8,8 @@ message FishSeatInfo {
   int32 cannon_mult = 4;
   bool online = 5;
   int64 gold = 6;
+  // Max accepted C2S_FishFire.client_seq for this seat (reconnect resume).
+  int64 last_client_seq = 7;
 }
 
 message FishSnapshot {

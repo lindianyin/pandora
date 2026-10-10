@@ -116,6 +116,7 @@ void FishRoomGame::SendSnapshot(int64_t uid) {
     s.cannon_mult = table_->seat(i).mult;
     s.online = table_->seat(i).online && !table_->seat(i).left;
     s.gold = SeatGold(su);
+    s.last_client_seq = table_->seat(i).max_client_seq;
     if (ctx_.store) {
       auto p = ctx_.store->GetPlayer(su);
       if (p) s.nickname = p->nickname;
@@ -180,6 +181,7 @@ void FishRoomGame::OnEvent(const fish::OutEvent& ev) {
     if (ev.seat >= 0 && ev.seat < fish::kMaxSeats) {
       s.cannon_mult = table_->seat(ev.seat).mult;
       s.online = table_->seat(ev.seat).online && !table_->seat(ev.seat).left;
+      s.last_client_seq = table_->seat(ev.seat).max_client_seq;
     }
     s.gold = SeatGold(ev.uid);
     Broadcast(ctx_, MsgId::kS2C_FishSeatUpdate, proto_wire::EncodeS2C_FishSeatUpdate(s));

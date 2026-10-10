@@ -97,7 +97,7 @@ onMounted(() => {
         <button @click="smartAll">全体智能摆牌</button>
         <button @click="autoAll">全体智能并确认</button>
         <button @click="topupAll">加币</button>
-        <button class="ghost" :disabled="!canLeaveAll" @click="leaveAll">离开</button>
+        <button class="ghost" :disabled="!canLeaveAll" @click="leaveAll">全部离开</button>
         <button class="ghost" @click="backLobby">大厅</button>
       </div>
     </header>

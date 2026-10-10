@@ -419,6 +419,22 @@ export function createPhzLabClient(slot: number, deviceId: string) {
     showSettle.value = false
   }
 
+  function leave() {
+    if (matching.value) {
+      sock?.cancelMatch()
+      matching.value = false
+      matchMsg.value = ''
+    }
+    sock?.leaveRoom()
+    roomId.value = 0
+    roomPhase.value = ''
+    phzRoundId.value = 0
+    phzSub.value = ''
+    hand.value = []
+    selectedHandIndex.value = null
+    showSettle.value = false
+  }
+
   return {
     label,
     deviceId,
@@ -471,6 +487,7 @@ export function createPhzLabClient(slot: number, deviceId: string) {
     discardSelected,
     claim,
     dismissSettle,
+    leave,
     phzTileLabel,
   }
 }

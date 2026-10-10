@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DdzLabPanel from './DdzLabPanel.vue'
 
@@ -13,7 +13,6 @@ function queryOne(v: unknown): string {
   return typeof s === 'string' ? s.trim().slice(0, 128) : ''
 }
 
-/** d0-d2, or hw=a,b,c. Missing slots are filled and written back so refresh keeps the same guests. */
 function labDeviceIds(): string[] {
   const q = route.query
   const packed = queryOne(q.hw || q.devices)
@@ -45,6 +44,8 @@ function setPanel(el: unknown, i: number) {
   if (el) panels.value[i] = el as InstanceType<typeof DdzLabPanel>
 }
 
+const canLeaveAll = computed(() => panels.value.some((p) => p && (p.roomId || p.matching)))
+
 async function bootAll() {
   booting.value = true
   try {
@@ -74,9 +75,25 @@ async function readyAll() {
   }
 }
 
+function leaveAll() {
+  for (const p of panels.value) {
+    if (p) p.leave()
+  }
+}
+
+function backLobby() {
+  leaveAll()
+  router.push('/lobby')
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
+
+onMounted(async () => {
+  await nextTick()
+  await bootAll()
+})
 </script>
 
 <template>
@@ -84,13 +101,13 @@ function sleep(ms: number) {
     <header class="bar">
       <div>
         <h1>斗地主 · 三联调试</h1>
-        <p class="tip">硬件码取自 URL 的 d0–d2。刷新后再登录，同一码回到原账号，用于断线重连。</p>
+        <p class="tip">进入后自动登录三人；硬件码写入 d0–d2，刷新同一游客。</p>
       </div>
       <div class="ops">
-        <button :disabled="booting" @click="bootAll">一键登录三人</button>
-        <button @click="matchAll">全员匹配</button>
-        <button @click="readyAll">全员准备</button>
-        <button class="ghost" @click="router.push('/lobby')">返回大厅</button>
+        <button class="primary" :disabled="booting" @click="matchAll">一键匹配</button>
+        <button class="primary" @click="readyAll">全体准备</button>
+        <button class="ghost" :disabled="!canLeaveAll" @click="leaveAll">全部离开</button>
+        <button class="ghost" @click="backLobby">返回大厅</button>
       </div>
     </header>
     <div class="grid">
@@ -106,7 +123,15 @@ function sleep(ms: number) {
 </template>
 
 <style scoped>
-.lab { min-height: 100vh; }
+.lab {
+  min-height: 100vh;
+  margin: 0;
+  padding: 16px 18px 24px;
+  background:
+    radial-gradient(ellipse at top, rgba(50, 100, 70, 0.5), transparent 55%),
+    linear-gradient(180deg, #123226 0%, #0b1a14 100%);
+  color: #e8f2ec;
+}
 .bar {
   display: flex;
   justify-content: space-between;
@@ -115,8 +140,8 @@ function sleep(ms: number) {
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
-.bar h1 { margin: 0; font-size: 1.25rem; }
-.tip { margin: 4px 0 0; color: #64748b; font-size: 13px; }
+.bar h1 { margin: 0; font-size: 1.4rem; }
+.tip { margin: 4px 0 0; color: #9db5a8; font-size: 13px; }
 .ops { display: flex; gap: 8px; flex-wrap: wrap; }
 .grid {
   display: grid;
@@ -125,7 +150,6 @@ function sleep(ms: number) {
     "s2 s1"
     "s0 s0";
   gap: 12px;
-  position: relative;
 }
 :deep(.pos-s0) { grid-area: s0; }
 :deep(.pos-s1) { grid-area: s1; }
@@ -141,12 +165,17 @@ function sleep(ms: number) {
 }
 button {
   border: 0;
-  background: #1d4ed8;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8f2ec;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   cursor: pointer;
 }
-button:disabled { opacity: 0.5; }
-button.ghost { background: #e2e8f0; color: #334155; }
+button:disabled { opacity: 0.45; }
+button.primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
+}
+button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.22); }
 </style>

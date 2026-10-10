@@ -126,6 +126,7 @@ struct FishSeatData {
   int32_t cannon_mult{1};
   bool online{true};
   int64_t gold{0};
+  int64_t last_client_seq{0};
 };
 
 struct FishSnapData {

@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGameSession } from '../composables/useGameSession'
 import { meldKindLabel, type HzmjMeld } from '../net/hzmjFront'
+import { hzmjTileFace } from '../net/frame'
 
 const router = useRouter()
 const {
@@ -89,37 +90,43 @@ function isCaishen(t: number) {
   return hzmjCaishen.value.includes(t)
 }
 
+function face(t: number) {
+  return hzmjTileFace(t)
+}
+
 function faceText(m: HzmjMeld, t: number) {
   return m.kind === 4 ? '?' : tileLabel(t)
 }
 </script>
 
 <template>
-  <section class="card profile">
-    <div>UID: {{ uid }} · {{ nickname }} · 金币 {{ gold }} / 钻石 {{ diamond }}</div>
-    <div>
-      WSS: {{ wsOk ? '已连接' : '未连接' }} · 房间 #{{ roomId }} · {{ roomPhase || hzmjSub || '-' }}
-      · 余牌 {{ hzmjWall }} · N={{ hzmjN }} · 局 {{ hzmjRoundId || '-' }} · 连庄 {{ hzmjLian }}
-    </div>
-  </section>
+  <div class="felt">
+    <header class="topbar">
+      <div>
+        <h1>杭州麻将</h1>
+        <p>
+          {{ nickname }} · 金币 {{ gold }} · 房间 #{{ roomId || '-' }} · 余牌 {{ hzmjWall }} · N={{ hzmjN }}
+          · 局 {{ hzmjRoundId || '-' }} · 连庄 {{ hzmjLian }}
+        </p>
+      </div>
+      <div class="top-actions">
+        <span class="meta-pill">
+          财神
+          <span v-for="tile in hzmjCaishen" :key="tile" class="cai-chip">{{ tileLabel(tile) }}</span>
+          · 庄 {{ hzmjBanker }}
+          <span v-if="hzmjPiaoSeat >= 0"> · 财飘 seat{{ hzmjPiaoSeat }}</span>
+        </span>
+        <span v-if="countdown > 0 && hzmjSub" class="timer" :class="{ mine: isMyTurn || isHzmjClaim }">
+          {{ isHzmjClaim ? '请选择' : isMyTurn ? '请出牌' : `等待${turnSeat}` }}
+          · {{ hzmjSub }} · {{ countdown }}s
+        </span>
+        <button class="ghost" @click="backLobby">大厅</button>
+        <button class="ghost" @click="router.push('/hzmj-lab')">四联 Lab</button>
+      </div>
+    </header>
 
-  <div v-if="errorBanner" class="banner err">{{ errorBanner }}</div>
-  <div v-if="reconnectHint" class="banner ok">{{ reconnectHint }}</div>
-
-  <section class="card table">
-    <div class="table-head">
-      <h2>杭州麻将</h2>
-      <span class="meta">
-        财神
-        <span v-for="tile in hzmjCaishen" :key="tile" class="cai">{{ tileLabel(tile) }}</span>
-        · 庄 {{ hzmjBanker }}
-        <span v-if="hzmjPiaoSeat >= 0" class="piao">财飘 seat{{ hzmjPiaoSeat }}</span>
-      </span>
-      <span v-if="countdown > 0 && hzmjSub" class="cd" :class="{ mine: isMyTurn || isHzmjClaim }">
-        {{ isHzmjClaim ? '请选择' : isMyTurn ? '请出牌' : `等待${turnSeat}` }}
-        · {{ hzmjSub }} · {{ countdown }}s
-      </span>
-    </div>
+    <div v-if="errorBanner" class="banner err">{{ errorBanner }}</div>
+    <div v-if="reconnectHint" class="banner ok">{{ reconnectHint }}</div>
 
     <div class="arena">
       <div class="opp">
@@ -127,9 +134,7 @@ function faceText(m: HzmjMeld, t: number) {
           <div class="name">
             {{ seatOpposite.nickname }}
             <span v-if="seatOpposite.seat_id === hzmjBanker" class="tag">庄</span>
-          </div>
-          <div class="info">
-            {{ seatCards(seatOpposite.seat_id) }}张
+            <span class="info">{{ seatCards(seatOpposite.seat_id) }}张</span>
             <span v-if="seatOpposite.trusteeship" class="trust">托管</span>
           </div>
           <div class="front">
@@ -139,8 +144,8 @@ function faceText(m: HzmjMeld, t: number) {
                 <span
                   v-for="(tile, ti) in m.tiles"
                   :key="'omt' + ti"
-                  class="face"
-                  :class="{ cai: isCaishen(tile), an: m.kind === 4 }"
+                  class="mtile sm"
+                  :class="[m.kind === 4 ? 'an' : face(tile).suit, { cai: isCaishen(tile) }]"
                 >
                   {{ faceText(m, tile) }}
                 </span>
@@ -150,8 +155,8 @@ function faceText(m: HzmjMeld, t: number) {
               <span
                 v-for="(tile, ti) in seatRiver(seatOpposite.seat_id)"
                 :key="'or' + ti"
-                class="face sm"
-                :class="{ cai: isCaishen(tile) }"
+                class="mtile xs"
+                :class="[face(tile).suit, { cai: isCaishen(tile) }]"
               >
                 {{ tileLabel(tile) }}
               </span>
@@ -167,8 +172,8 @@ function faceText(m: HzmjMeld, t: number) {
             <div class="name">
               {{ seatLeft.nickname }}
               <span v-if="seatLeft.seat_id === hzmjBanker" class="tag">庄</span>
+              <span class="info">{{ seatCards(seatLeft.seat_id) }}张</span>
             </div>
-            <div class="info">{{ seatCards(seatLeft.seat_id) }}张</div>
             <div class="front">
               <div v-if="seatMelds(seatLeft.seat_id).length" class="meld-row">
                 <div v-for="(m, mi) in seatMelds(seatLeft.seat_id)" :key="'lm' + mi" class="meld-group">
@@ -176,8 +181,8 @@ function faceText(m: HzmjMeld, t: number) {
                   <span
                     v-for="(tile, ti) in m.tiles"
                     :key="'lmt' + ti"
-                    class="face"
-                    :class="{ cai: isCaishen(tile), an: m.kind === 4 }"
+                    class="mtile sm"
+                    :class="[m.kind === 4 ? 'an' : face(tile).suit, { cai: isCaishen(tile) }]"
                   >
                     {{ faceText(m, tile) }}
                   </span>
@@ -187,8 +192,8 @@ function faceText(m: HzmjMeld, t: number) {
                 <span
                   v-for="(tile, ti) in seatRiver(seatLeft.seat_id)"
                   :key="'lr' + ti"
-                  class="face sm"
-                  :class="{ cai: isCaishen(tile) }"
+                  class="mtile xs"
+                  :class="[face(tile).suit, { cai: isCaishen(tile) }]"
                 >
                   {{ tileLabel(tile) }}
                 </span>
@@ -200,9 +205,10 @@ function faceText(m: HzmjMeld, t: number) {
 
         <div class="center">
           <div v-if="hzmjLastDiscard" class="discard">
-            打出 seat{{ hzmjLastDiscard.seat }}
-            <span class="tile" :class="{ cai: isCaishen(hzmjLastDiscard.tile) }">
-              {{ tileLabel(hzmjLastDiscard.tile) }}
+            <span class="muted">seat{{ hzmjLastDiscard.seat }} 打出</span>
+            <span class="mtile" :class="[face(hzmjLastDiscard.tile).suit, { cai: isCaishen(hzmjLastDiscard.tile) }]">
+              <span class="num">{{ face(hzmjLastDiscard.tile).num }}</span>
+              <span class="kind">{{ face(hzmjLastDiscard.tile).kind }}</span>
             </span>
           </div>
           <div v-else class="discard muted">等待出牌</div>
@@ -213,8 +219,8 @@ function faceText(m: HzmjMeld, t: number) {
             <div class="name">
               {{ seatRight.nickname }}
               <span v-if="seatRight.seat_id === hzmjBanker" class="tag">庄</span>
+              <span class="info">{{ seatCards(seatRight.seat_id) }}张</span>
             </div>
-            <div class="info">{{ seatCards(seatRight.seat_id) }}张</div>
             <div class="front">
               <div v-if="seatMelds(seatRight.seat_id).length" class="meld-row">
                 <div v-for="(m, mi) in seatMelds(seatRight.seat_id)" :key="'rm' + mi" class="meld-group">
@@ -222,8 +228,8 @@ function faceText(m: HzmjMeld, t: number) {
                   <span
                     v-for="(tile, ti) in m.tiles"
                     :key="'rmt' + ti"
-                    class="face"
-                    :class="{ cai: isCaishen(tile), an: m.kind === 4 }"
+                    class="mtile sm"
+                    :class="[m.kind === 4 ? 'an' : face(tile).suit, { cai: isCaishen(tile) }]"
                   >
                     {{ faceText(m, tile) }}
                   </span>
@@ -233,8 +239,8 @@ function faceText(m: HzmjMeld, t: number) {
                 <span
                   v-for="(tile, ti) in seatRiver(seatRight.seat_id)"
                   :key="'rr' + ti"
-                  class="face sm"
-                  :class="{ cai: isCaishen(tile) }"
+                  class="mtile xs"
+                  :class="[face(tile).suit, { cai: isCaishen(tile) }]"
                 >
                   {{ tileLabel(tile) }}
                 </span>
@@ -250,9 +256,9 @@ function faceText(m: HzmjMeld, t: number) {
           <div class="name">
             {{ seatSelf.nickname }}（我）
             <span v-if="seatSelf.seat_id === hzmjBanker" class="tag">庄</span>
-          </div>
-          <div class="info">
-            {{ seatSelf.ready ? '已准备' : '未准备' }} · {{ seatCards(seatSelf.seat_id) }}张
+            <span class="info">
+              {{ seatSelf.ready ? '已准备' : '未准备' }} · {{ seatCards(seatSelf.seat_id) }}张
+            </span>
             <span v-if="seatSelf.trusteeship" class="trust">托管</span>
           </div>
           <div class="front">
@@ -262,8 +268,8 @@ function faceText(m: HzmjMeld, t: number) {
                 <span
                   v-for="(tile, ti) in m.tiles"
                   :key="'smt' + ti"
-                  class="face"
-                  :class="{ cai: isCaishen(tile), an: m.kind === 4 }"
+                  class="mtile sm"
+                  :class="[m.kind === 4 ? 'an' : face(tile).suit, { cai: isCaishen(tile) }]"
                 >
                   {{ faceText(m, tile) }}
                 </span>
@@ -273,8 +279,8 @@ function faceText(m: HzmjMeld, t: number) {
               <span
                 v-for="(tile, ti) in seatRiver(seatSelf.seat_id)"
                 :key="'sr' + ti"
-                class="face sm"
-                :class="{ cai: isCaishen(tile) }"
+                class="mtile xs"
+                :class="[face(tile).suit, { cai: isCaishen(tile) }]"
               >
                 {{ tileLabel(tile) }}
               </span>
@@ -286,269 +292,282 @@ function faceText(m: HzmjMeld, t: number) {
           <button
             v-for="(tile, idx) in hand"
             :key="idx + '-' + tile"
-            class="tile-btn"
-            :class="{ on: selectedHandIndex === idx, cai: isCaishen(tile) }"
+            type="button"
+            class="mtile hand-tile"
+            :class="[face(tile).suit, { on: selectedHandIndex === idx, cai: isCaishen(tile) }]"
             @click="selectTile(idx)"
           >
-            {{ tileLabel(tile) }}
+            <span class="num">{{ face(tile).num }}</span>
+            <span class="kind">{{ face(tile).kind }}</span>
           </button>
         </div>
 
-        <div class="row actions">
-          <button v-if="canReady" type="button" :disabled="iAmReady" @click="doReady">
+        <div class="actions">
+          <button v-if="canReady" class="primary" :disabled="iAmReady" @click="doReady">
             {{ iAmReady ? '已准备' : '准备' }}
           </button>
           <template v-if="isHzmjDiscardTurn">
-            <button v-if="canZimoHu" type="button" class="warn" @click="doHzmjAction(4)">自摸</button>
-            <button type="button" :disabled="selectedHandIndex == null" @click="doHzmjDiscard">出牌</button>
-            <button
-              v-for="g in anGangCandidates"
-              :key="'gang-' + g"
-              type="button"
-              class="warn"
-              @click="doHzmjAnGang(g)"
-            >
+            <button v-if="canZimoHu" class="warn" @click="doHzmjAction(4)">自摸</button>
+            <button class="primary" :disabled="selectedHandIndex == null" @click="doHzmjDiscard">出牌</button>
+            <button v-for="g in anGangCandidates" :key="'gang-' + g" class="warn" @click="doHzmjAnGang(g)">
               暗杠 {{ tileLabel(g) }}
             </button>
-            <button
-              v-for="g in buGangCandidates"
-              :key="'bugang-' + g"
-              type="button"
-              class="warn"
-              @click="doHzmjBuGang(g)"
-            >
+            <button v-for="g in buGangCandidates" :key="'bugang-' + g" class="warn" @click="doHzmjBuGang(g)">
               补杠 {{ tileLabel(g) }}
             </button>
           </template>
           <template v-if="isHzmjClaim">
             <span v-if="hzmjClaimHint" class="hint">{{ hzmjClaimHint }}</span>
-            <button type="button" :disabled="hzmjClaimSent" @click="doHzmjAction(0)">过</button>
-            <button v-if="canClaimChi" type="button" :disabled="hzmjClaimSent" @click="doHzmjAction(1)">吃</button>
-            <button v-if="canClaimPeng" type="button" :disabled="hzmjClaimSent" @click="doHzmjAction(2)">碰</button>
-            <button v-if="canClaimGang" type="button" :disabled="hzmjClaimSent" @click="doHzmjAction(3)">杠</button>
-            <button
-              v-if="canClaimHu"
-              type="button"
-              class="warn"
-              :disabled="hzmjClaimSent"
-              @click="doHzmjAction(4)"
-            >
-              胡
-            </button>
+            <button :disabled="hzmjClaimSent" @click="doHzmjAction(0)">过</button>
+            <button v-if="canClaimChi" :disabled="hzmjClaimSent" @click="doHzmjAction(1)">吃</button>
+            <button v-if="canClaimPeng" :disabled="hzmjClaimSent" @click="doHzmjAction(2)">碰</button>
+            <button v-if="canClaimGang" :disabled="hzmjClaimSent" @click="doHzmjAction(3)">杠</button>
+            <button v-if="canClaimHu" class="warn" :disabled="hzmjClaimSent" @click="doHzmjAction(4)">胡</button>
           </template>
-          <button type="button" class="leave" @click="backLobby">返回大厅</button>
         </div>
       </div>
     </div>
-  </section>
 
-  <div v-if="showHzmjSettle && hzmjSettle" class="modal-mask">
-    <div class="modal">
-      <h3>结算</h3>
-      <p>
-        底分 {{ hzmjSettle.base_score || hzmjBaseScore }} · M={{ hzmjSettle.M }} · N={{ hzmjSettle.N }}
-        · {{ hzmjSettle.is_zimo ? '自摸' : '点炮' }}
-        <span v-if="hzmjSettle.contractor_seat >= 0"> · 承包 seat{{ hzmjSettle.contractor_seat }}</span>
-      </p>
-      <ul>
-        <li v-for="e in hzmjSettle.entries" :key="e.uid">
-          座位{{ e.seat_id }}
-          <span :class="e.delta_gold >= 0 ? 'win' : 'lose'">
-            {{ e.delta_gold >= 0 ? '+' : '' }}{{ e.delta_gold }}
-          </span>
-          <span v-if="e.uid === uid">（我）</span>
-        </li>
-      </ul>
-      <div class="row">
-        <button @click="doReady">再来一局</button>
-        <button class="ghost" @click="backLobby">返回大厅</button>
-        <button class="ghost" @click="closeSettleStay">关闭</button>
+    <details class="log-box">
+      <summary>日志</summary>
+      <pre>{{ logs.join('\n') }}</pre>
+    </details>
+
+    <div v-if="showHzmjSettle && hzmjSettle" class="modal-mask">
+      <div class="modal">
+        <h3>结算</h3>
+        <p>
+          底分 {{ hzmjSettle.base_score || hzmjBaseScore }} · M={{ hzmjSettle.M }} · N={{ hzmjSettle.N }}
+          · {{ hzmjSettle.is_zimo ? '自摸' : '点炮' }}
+          <span v-if="hzmjSettle.contractor_seat >= 0"> · 承包 seat{{ hzmjSettle.contractor_seat }}</span>
+        </p>
+        <ul>
+          <li v-for="e in hzmjSettle.entries" :key="e.uid">
+            座位{{ e.seat_id }}
+            <span :class="e.delta_gold >= 0 ? 'win' : 'lose'">
+              {{ e.delta_gold >= 0 ? '+' : '' }}{{ e.delta_gold }}
+            </span>
+            <span v-if="e.uid === uid">（我）</span>
+          </li>
+        </ul>
+        <div class="actions">
+          <button class="primary-dark" @click="doReady">再来一局</button>
+          <button class="ghost-dark" @click="backLobby">返回大厅</button>
+          <button class="ghost-dark" @click="closeSettleStay">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showLiuJu" class="modal-mask">
+      <div class="modal">
+        <h3>流局</h3>
+        <p>连庄 {{ hzmjLian }}</p>
+        <div class="actions">
+          <button class="primary-dark" @click="doReady">再来一局</button>
+          <button class="ghost-dark" @click="backLobby">返回大厅</button>
+          <button class="ghost-dark" @click="closeSettleStay">关闭</button>
+        </div>
       </div>
     </div>
   </div>
-
-  <div v-if="showLiuJu" class="modal-mask">
-    <div class="modal">
-      <h3>流局</h3>
-      <p>连庄 {{ hzmjLian }}</p>
-      <div class="row">
-        <button @click="doReady">再来一局</button>
-        <button class="ghost" @click="backLobby">返回大厅</button>
-        <button class="ghost" @click="closeSettleStay">关闭</button>
-      </div>
-    </div>
-  </div>
-
-  <section class="card">
-    <h2>日志</h2>
-    <pre class="log">{{ logs.join('\n') }}</pre>
-  </section>
 </template>
 
 <style scoped>
-.card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 16px;
-  margin-bottom: 16px;
+.felt {
+  min-height: 100vh;
+  padding: 16px 18px 28px;
+  background:
+    radial-gradient(ellipse at top, rgba(40, 95, 75, 0.55), transparent 55%),
+    linear-gradient(180deg, #0f2e24 0%, #0a1a14 100%);
+  color: #e8f2ec;
 }
-.profile { line-height: 1.6; font-size: 14px; }
-.table-head {
+.topbar {
   display: flex;
-  flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
-.table-head h2 { margin: 0; }
-.meta { color: #64748b; font-size: 13px; }
-.cai {
+.topbar h1 { margin: 0; font-size: 1.5rem; letter-spacing: 0.04em; }
+.topbar p { margin: 4px 0 0; opacity: 0.8; font-size: 13px; }
+.top-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.meta-pill, .timer {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: #cfe7da;
+}
+.timer { border-color: rgba(232, 197, 71, 0.35); color: #e8c547; }
+.timer.mine { background: rgba(232, 197, 71, 0.15); }
+.cai-chip {
   display: inline-block;
   margin-left: 4px;
-  background: #fef3c7;
-  color: #b45309;
+  background: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
   padding: 1px 6px;
   border-radius: 4px;
-  font-weight: 600;
+  font-weight: 700;
 }
-.piao { margin-left: 8px; color: #c026d3; font-weight: 600; }
-.cd {
-  background: #f1f5f9;
-  color: #475569;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 13px;
+.banner { padding: 8px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
+.banner.err { background: rgba(185, 28, 28, 0.25); color: #ffb4b4; }
+.banner.ok { background: rgba(4, 120, 87, 0.25); color: #9be7c4; }
+.arena {
+  max-width: 1180px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.cd.mine { background: #fef3c7; color: #b45309; }
-.arena { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
 .opp { display: flex; justify-content: center; }
 .mid {
   display: grid;
-  grid-template-columns: 1fr 1.2fr 1fr;
+  grid-template-columns: 1fr 1.1fr 1fr;
   gap: 12px;
   align-items: center;
 }
 .center { text-align: center; }
-.discard { font-size: 16px; font-weight: 600; }
-.discard.muted { color: #94a3b8; font-weight: 400; }
-.discard .tile {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 6px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: #f8fafc;
+.discard {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 14px;
+  padding: 12px 16px;
 }
-.discard .tile.cai { background: #fef3c7; border-color: #f59e0b; }
+.discard.muted, .muted { color: #6f877a; }
 .seat {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 10px;
-  font-size: 13px;
-  position: relative;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 12px;
   min-height: 72px;
-  background: #fafafa;
 }
-.seat.me { border-color: #0f766e; background: #f0fdfa; }
-.seat.turn { box-shadow: 0 0 0 2px #f59e0b; }
+.seat.me { border-color: rgba(232, 197, 71, 0.4); background: rgba(232, 197, 71, 0.08); }
+.seat.turn { box-shadow: 0 0 0 2px #e8c547; }
+.name { font-weight: 700; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.info { font-size: 12px; color: #9db5a8; font-weight: 400; }
 .tag {
-  margin-left: 6px;
-  background: #b45309;
-  color: #fff;
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
   font-size: 11px;
-  padding: 2px 6px;
+  padding: 2px 7px;
   border-radius: 4px;
+  font-weight: 700;
 }
-.trust { color: #b91c1c; margin-left: 6px; }
-.front { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-.meld-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.trust { color: #ffb074; }
+.front { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.meld-row, .river { display: flex; flex-wrap: wrap; gap: 6px; }
 .meld-group {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 4px;
-  background: #e2e8f0;
-  border-radius: 6px;
+  gap: 3px;
+  padding: 3px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
 }
-.meld-tag {
-  font-size: 10px;
-  color: #475569;
-  margin-right: 2px;
-  font-weight: 600;
-}
-.face {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 32px;
-  padding: 0 4px;
-  border: 1px solid #94a3b8;
-  border-radius: 4px;
-  background: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.face.sm {
-  min-width: 24px;
-  height: 26px;
-  font-size: 11px;
-  opacity: 0.9;
-}
-.face.cai { background: #fef3c7; border-color: #f59e0b; color: #b45309; }
-.face.an { background: #334155; color: #e2e8f0; border-color: #1e293b; }
-.river {
+.meld-tag { font-size: 10px; color: #9db5a8; font-weight: 700; }
+.play { margin-top: 6px; min-height: 1.2em; font-weight: 700; }
+.hand {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
-  max-width: 100%;
+  gap: 8px;
+  margin: 14px 0 10px;
+  justify-content: center;
+  min-height: 84px;
 }
-.play { margin-top: 6px; color: #0f172a; font-weight: 600; min-height: 1.2em; }
-.hand { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; min-height: 40px; }
-.tile-btn {
-  background: #f8fafc;
-  color: #111;
-  border: 1px solid #cbd5e1;
-  min-width: 48px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.tile-btn.on { background: #0f766e; color: #fff; border-color: #0f766e; }
-.tile-btn.cai { border-color: #f59e0b; }
-.tile-btn.cai.on { background: #b45309; border-color: #b45309; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; }
-button {
+.mtile {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 58px;
+  padding: 0 6px;
   border: 0;
-  background: #0f766e;
-  color: #fff;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fffef8 0%, #efe9da 100%);
+  box-shadow: 0 2px 0 #c4bba6, 0 6px 12px rgba(0, 0, 0, 0.28);
+  color: #1a1a1a;
+  font-weight: 700;
+  line-height: 1.05;
+}
+.mtile.hand-tile {
+  width: 52px;
+  height: 74px;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.mtile.hand-tile:hover { transform: translateY(-4px); }
+.mtile.hand-tile.on {
+  outline: 2px solid #e8c547;
+  outline-offset: 2px;
+  transform: translateY(-10px);
+}
+.mtile.sm { min-width: 34px; height: 44px; font-size: 12px; }
+.mtile.xs { min-width: 28px; height: 34px; font-size: 11px; opacity: 0.92; }
+.mtile .num { font-size: 16px; font-weight: 800; }
+.mtile .kind { font-size: 12px; }
+.mtile.hand-tile .num { font-size: 20px; }
+.mtile.hand-tile .kind { font-size: 13px; }
+.mtile.wan { color: #1d4ed8; }
+.mtile.tiao { color: #15803d; }
+.mtile.tong { color: #c2410c; }
+.mtile.zi { color: #111827; }
+.mtile.cai {
+  box-shadow: 0 0 0 2px #f59e0b, 0 2px 0 #c4bba6, 0 6px 12px rgba(0, 0, 0, 0.28);
+  background: linear-gradient(180deg, #fff7d6 0%, #fde68a 100%);
+}
+.mtile.an {
+  background: linear-gradient(180deg, #334155, #1e293b);
+  color: #e2e8f0;
+  box-shadow: 0 2px 0 #0f172a, 0 6px 12px rgba(0, 0, 0, 0.35);
+}
+.actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+.actions button, .ghost {
+  border: 0;
+  border-radius: 8px;
   padding: 8px 14px;
-  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8f2ec;
   cursor: pointer;
 }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost { background: #e2e8f0; color: #334155; }
-button.leave {
-  background: #fff;
-  color: #334155;
-  border: 1px solid #94a3b8;
+.actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.actions .primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
 }
-button.warn { background: #c2410c; }
-.hint {
-  align-self: center;
-  color: #b45309;
-  font-size: 13px;
-  margin-right: 4px;
+.actions .warn { background: #c2410c; color: #fff; font-weight: 700; }
+.ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.22);
 }
-.banner { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; }
-.banner.err { background: #fef2f2; color: #b91c1c; }
-.banner.ok { background: #ecfdf5; color: #047857; }
+.hint { color: #fbbf24; font-size: 13px; }
+.primary-dark, .ghost-dark {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.primary-dark { background: #0f766e; color: #fff; }
+.ghost-dark { background: #e2e8f0; color: #334155; }
+.log-box {
+  max-width: 1180px;
+  margin: 16px auto 0;
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 10px;
+  padding: 8px 12px;
+  color: #b7cfc2;
+  font-size: 12px;
+}
+.log-box summary { cursor: pointer; }
+.log-box pre { margin: 8px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; }
 .modal-mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -556,21 +575,15 @@ button.warn { background: #c2410c; }
 }
 .modal {
   background: #fff;
-  border-radius: 12px;
+  color: #1a1a1a;
+  border-radius: 14px;
   padding: 20px;
   width: min(420px, 92vw);
 }
 .modal ul { padding-left: 18px; }
 .win { color: #047857; font-weight: 700; }
 .lose { color: #b91c1c; font-weight: 700; }
-.log {
-  margin: 0;
-  max-height: 240px;
-  overflow: auto;
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
+@media (max-width: 720px) {
+  .mid { grid-template-columns: 1fr; }
 }
 </style>

@@ -495,6 +495,7 @@ void FillFishSeat(FishSeatInfo* out, const FishSeatData& s) {
   out->set_cannon_mult(s.cannon_mult);
   out->set_online(s.online);
   out->set_gold(s.gold);
+  out->set_last_client_seq(s.last_client_seq);
 }
 
 void FillFishSnap(FishSnapshot* out, const FishSnapData& f) {

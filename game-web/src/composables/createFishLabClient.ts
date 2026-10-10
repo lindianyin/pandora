@@ -1,7 +1,16 @@
 import { computed, ref } from 'vue'
 import { labTopupGold, loginGuest } from '../api'
 import { GameSocket } from '../net/GameSocket'
-import type { FishSnap, LobbyTemplate, RoomSeat } from '../net/frame'
+import {
+  FISH_SEAT_CANNON_POS,
+  fishCannonAngle,
+  fishCannonAngleFromVel,
+  fishSeatIsTop,
+  type FishSeatInfo,
+  type FishSnap,
+  type LobbyTemplate,
+  type RoomSeat,
+} from '../net/frame'
 
 const WSS_URL = import.meta.env.VITE_WSS_URL || 'wss://127.0.0.1:8444/'
 
@@ -26,6 +35,10 @@ export function createFishLabClient(slot: number, deviceId: string) {
   const cannonMults = ref<number[]>([1, 2, 5, 10])
   const mult = ref(1)
   const fishList = ref<FishSnap[]>([])
+  const fishSeats = ref<FishSeatInfo[]>([])
+  /** Top seats default face toward table center (down). */
+  const cannonAngles = ref<number[]>([0, 0, 180, 180])
+  const firingSeat = ref(-1)
   const bullets = ref<{ id: number; x: number; y: number; vx: number; vy: number }[]>([])
   const aimX = ref(960)
   const aimY = ref(540)
@@ -33,8 +46,59 @@ export function createFishLabClient(slot: number, deviceId: string) {
   let sock: GameSocket | null = null
   let fireSeq = 0
   let animTimer: number | null = null
+  let fireFlashTimer: number | null = null
+
+  function noteFireSeq(v: number) {
+    if (v > fireSeq) fireSeq = v
+  }
+
+  function nextFireSeq() {
+    fireSeq += 1
+    return fireSeq
+  }
 
   const fireCost = computed(() => mult.value * baseScore.value)
+
+  const cannons = computed(() =>
+    [0, 1, 2, 3].map((seat) => {
+      const pos = FISH_SEAT_CANNON_POS[seat]!
+      const info = fishSeats.value.find((s) => s.seat_id === seat)
+      const isMe = seat === mySeat.value
+      return {
+        seat,
+        leftPct: (pos.x / 1920) * 100,
+        bottomPct: (pos.y / 1080) * 100,
+        angle: cannonAngles.value[seat] ?? (fishSeatIsTop(seat) ? 180 : 0),
+        mult: isMe ? mult.value : info?.cannon_mult || 1,
+        nickname: info?.nickname || `座${seat}`,
+        me: isMe,
+        empty: !info || !info.uid,
+        firing: firingSeat.value === seat,
+        top: fishSeatIsTop(seat),
+      }
+    }),
+  )
+
+  function setFishSeat(s: FishSeatInfo) {
+    const rest = fishSeats.value.filter((x) => x.seat_id !== s.seat_id)
+    fishSeats.value = [...rest, s].sort((a, b) => a.seat_id - b.seat_id)
+  }
+
+  function aimSeat(seat: number, ax: number, ay: number) {
+    const pos = FISH_SEAT_CANNON_POS[seat]
+    if (!pos) return
+    const next = cannonAngles.value.slice()
+    next[seat] = fishCannonAngle(pos.x, pos.y, ax, ay)
+    cannonAngles.value = next
+  }
+
+  function flashFire(seat: number) {
+    firingSeat.value = seat
+    if (fireFlashTimer != null) clearTimeout(fireFlashTimer)
+    fireFlashTimer = window.setTimeout(() => {
+      if (firingSeat.value === seat) firingSeat.value = -1
+    }, 140)
+  }
 
   function pushLog(line: string) {
     const t = new Date().toLocaleTimeString()
@@ -126,10 +190,25 @@ export function createFishLabClient(slot: number, deviceId: string) {
         cannonMults.value = g.cannon_mults.length ? g.cannon_mults : cannonMults.value
         mult.value = cannonMults.value[0] || 1
         fishList.value = g.fish
+        fishSeats.value = [...g.seats]
         const me = g.seats.find((s) => s.seat_id === g.self_seat)
-        if (me) gold.value = me.gold
+        if (me) {
+          gold.value = me.gold
+          if (me.cannon_mult > 0) mult.value = me.cannon_mult
+          noteFireSeq(me.last_client_seq || 0)
+        }
         startAnim()
-        pushLog(`fish start room=${g.room_id} round=${g.round_id} gold=${gold.value}`)
+        pushLog(
+          `fish start room=${g.room_id} round=${g.round_id} gold=${gold.value} fireSeq=${fireSeq}`,
+        )
+      },
+      onFishSeatUpdate: (s) => {
+        setFishSeat(s)
+        if (s.seat_id === mySeat.value) {
+          gold.value = s.gold
+          if (s.cannon_mult > 0) mult.value = s.cannon_mult
+          noteFireSeq(s.last_client_seq || 0)
+        }
       },
       onFishSpawn: (list) => upsertFish(list),
       onFishDespawn: (s) => {
@@ -137,7 +216,23 @@ export function createFishLabClient(slot: number, deviceId: string) {
         fishList.value = fishList.value.filter((f) => !dead.has(f.fish_id))
       },
       onFishFire: (f) => {
-        if (f.uid === uid.value) gold.value = f.gold
+        if (f.uid === uid.value) {
+          gold.value = f.gold
+          noteFireSeq(f.client_seq || 0)
+        }
+        const next = cannonAngles.value.slice()
+        next[f.seat_id] = fishCannonAngleFromVel(f.vx, f.vy)
+        cannonAngles.value = next
+        flashFire(f.seat_id)
+        const info = fishSeats.value.find((s) => s.seat_id === f.seat_id)
+        if (info) {
+          setFishSeat({
+            ...info,
+            cannon_mult: f.mult,
+            gold: f.gold,
+            last_client_seq: Math.max(info.last_client_seq || 0, f.client_seq || 0),
+          })
+        }
         bullets.value = [
           ...bullets.value,
           { id: f.bullet_id, x: f.x, y: f.y, vx: f.vx, vy: f.vy },
@@ -208,13 +303,36 @@ export function createFishLabClient(slot: number, deviceId: string) {
       errorBanner.value = `余额不足（本发 ${fireCost.value}，当前 ${gold.value}），请点「补给金币」`
       return
     }
-    fireSeq += 1
-    sock?.fishFire(mult.value, aimX.value, aimY.value, fireSeq)
+    sock?.fishFire(mult.value, aimX.value, aimY.value, nextFireSeq())
+  }
+
+  /** Fire toward pond click (client coords relative to pond element). */
+  function fireAtPond(ev: MouseEvent) {
+    if (!roundId.value) return
+    const el = ev.currentTarget as HTMLElement
+    const rect = el.getBoundingClientRect()
+    aimX.value = ((ev.clientX - rect.left) / rect.width) * 1920
+    aimY.value = (1 - (ev.clientY - rect.top) / rect.height) * 1080
+    if (mySeat.value >= 0) aimSeat(mySeat.value, aimX.value, aimY.value)
+    fire()
+  }
+
+  function aimAtPond(ev: MouseEvent) {
+    if (!roundId.value || mySeat.value < 0) return
+    const el = ev.currentTarget as HTMLElement
+    const rect = el.getBoundingClientRect()
+    aimX.value = ((ev.clientX - rect.left) / rect.width) * 1920
+    aimY.value = (1 - (ev.clientY - rect.top) / rect.height) * 1080
+    aimSeat(mySeat.value, aimX.value, aimY.value)
   }
 
   function setMult(m: number) {
     mult.value = m
     sock?.fishSetMult(m)
+    if (mySeat.value >= 0) {
+      const info = fishSeats.value.find((s) => s.seat_id === mySeat.value)
+      if (info) setFishSeat({ ...info, cannon_mult: m })
+    }
   }
 
   function leave() {
@@ -228,13 +346,18 @@ export function createFishLabClient(slot: number, deviceId: string) {
       sock?.leaveRoom()
     }
     stopAnim()
+    if (fireFlashTimer != null) clearTimeout(fireFlashTimer)
     fishList.value = []
+    fishSeats.value = []
+    cannonAngles.value = [0, 0, 180, 180]
+    firingSeat.value = -1
     bullets.value = []
     roomId.value = 0
     roundId.value = 0
     roomPhase.value = ''
     seats.value = []
     mySeat.value = -1
+    fireSeq = 0
     pushLog('left room')
   }
 
@@ -268,6 +391,8 @@ export function createFishLabClient(slot: number, deviceId: string) {
     cannonMults,
     mult,
     fishList,
+    fishSeats,
+    cannons,
     bullets,
     aimX,
     aimY,
@@ -285,6 +410,8 @@ export function createFishLabClient(slot: number, deviceId: string) {
     oneClickLeave,
     topupGold,
     fire,
+    fireAtPond,
+    aimAtPond,
     setMult,
     leave,
   }

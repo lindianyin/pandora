@@ -453,10 +453,18 @@ export function createLabClient(slot: number, deviceId: string) {
   }
 
   function leave() {
+    if (matching.value) {
+      sock?.cancelMatch()
+      matching.value = false
+      matchMsg.value = ''
+    }
     sock?.leaveRoom()
     roomId.value = 0
+    roomPhase.value = ''
     hzmjSub.value = ''
+    hzmjRoundId.value = 0
     hand.value = []
+    selectedHandIndex.value = null
   }
 
   function dispose() {

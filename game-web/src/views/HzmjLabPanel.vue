@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount } from 'vue'
 import { createLabClient } from '../composables/createLabClient'
 import type { HzmjMeld } from '../net/hzmjFront'
+import { hzmjTileFace } from '../net/frame'
 
 const props = defineProps<{ slotIndex: number; deviceId: string }>()
 const c = createLabClient(props.slotIndex, props.deviceId)
 
-/** Table position: seat0 下 → seat1 右 → seat2 上 → seat3 左（逆时针） */
 const tablePos = computed(() => {
   const seat = c.mySeat.value >= 0 ? c.mySeat.value : props.slotIndex
   return Math.min(3, Math.max(0, seat))
@@ -19,11 +19,15 @@ defineExpose({
   login: () => c.login(),
   matchHzmj: () => c.matchHzmj(),
   doReady: () => c.doReady(),
+  leave: () => c.leave(),
   get wsOk() {
     return c.wsOk.value
   },
   get roomId() {
     return c.roomId.value
+  },
+  get matching() {
+    return c.matching.value
   },
 })
 
@@ -33,6 +37,10 @@ function isCaishen(t: number) {
 
 function seatMelds(seatId: number): HzmjMeld[] {
   return c.hzmjMelds.value[seatId] || []
+}
+
+function face(t: number) {
+  return hzmjTileFace(t)
 }
 </script>
 
@@ -59,7 +67,7 @@ function seatMelds(seatId: number): HzmjMeld[] {
     <div class="row">
       <button v-if="!c.wsOk.value" :disabled="c.busy.value" @click="c.login()">登录</button>
       <button v-else-if="!c.roomId.value" :disabled="c.matching.value" @click="c.matchHzmj()">匹配</button>
-      <button v-if="c.canReady.value" :disabled="c.iAmReady.value" @click="c.doReady()">
+      <button v-if="c.canReady.value" class="primary" :disabled="c.iAmReady.value" @click="c.doReady()">
         {{ c.iAmReady.value ? 'OK' : '准备' }}
       </button>
       <button v-if="c.roomId.value" class="ghost" @click="c.leave()">离开</button>
@@ -72,7 +80,9 @@ function seatMelds(seatId: number): HzmjMeld[] {
 
     <div v-if="c.hzmjLastDiscard.value" class="disc">
       出牌 seat{{ c.hzmjLastDiscard.value.seat }}
-      <b>{{ c.tileLabel(c.hzmjLastDiscard.value.tile) }}</b>
+      <span class="mtile sm" :class="[face(c.hzmjLastDiscard.value.tile).suit, { cai: isCaishen(c.hzmjLastDiscard.value.tile) }]">
+        {{ c.tileLabel(c.hzmjLastDiscard.value.tile) }}
+      </span>
     </div>
 
     <div class="seats">
@@ -86,11 +96,21 @@ function seatMelds(seatId: number): HzmjMeld[] {
         <div class="melds">
           <span v-for="(m, mi) in seatMelds(s.seat_id)" :key="mi" class="mg">
             {{ c.meldKindLabel(m.kind) }}
-            <i v-for="(t, ti) in m.tiles" :key="ti">{{ c.tileLabel(t) }}</i>
+            <i
+              v-for="(t, ti) in m.tiles"
+              :key="ti"
+              class="mtile xs"
+              :class="[m.kind === 4 ? 'an' : face(t).suit, { cai: isCaishen(t) }]"
+            >{{ m.kind === 4 ? '?' : c.tileLabel(t) }}</i>
           </span>
         </div>
         <div class="river">
-          <i v-for="(t, ti) in c.hzmjRivers.value[s.seat_id] || []" :key="ti">{{ c.tileLabel(t) }}</i>
+          <i
+            v-for="(t, ti) in c.hzmjRivers.value[s.seat_id] || []"
+            :key="ti"
+            class="mtile xs"
+            :class="[face(t).suit, { cai: isCaishen(t) }]"
+          >{{ c.tileLabel(t) }}</i>
         </div>
         <div class="lp">{{ c.lastPlays.value[s.seat_id] || '' }}</div>
       </div>
@@ -101,38 +121,24 @@ function seatMelds(seatId: number): HzmjMeld[] {
       <button
         v-for="(t, idx) in c.hand.value"
         :key="idx + '-' + t"
-        class="tile"
-        :class="{ on: c.selectedHandIndex.value === idx, cai: isCaishen(t) }"
+        type="button"
+        class="mtile"
+        :class="[face(t).suit, { on: c.selectedHandIndex.value === idx, cai: isCaishen(t) }]"
         @click="c.selectTile(idx)"
       >
-        {{ c.tileLabel(t) }}
+        <span class="num">{{ face(t).num }}</span>
+        <span class="kind">{{ face(t).kind }}</span>
       </button>
     </div>
 
     <div class="row">
       <template v-if="c.isHzmjDiscardTurn.value">
-        <button
-          v-if="c.canZimoHu.value"
-          class="warn"
-          @click="c.doAction(4)"
-        >
-          自摸
-        </button>
-        <button :disabled="c.selectedHandIndex.value == null" @click="c.doDiscard()">出牌</button>
-        <button
-          v-for="g in c.anGangCandidates.value"
-          :key="'g' + g"
-          class="warn"
-          @click="c.doAnGang(g)"
-        >
+        <button v-if="c.canZimoHu.value" class="warn" @click="c.doAction(4)">自摸</button>
+        <button class="primary" :disabled="c.selectedHandIndex.value == null" @click="c.doDiscard()">出牌</button>
+        <button v-for="g in c.anGangCandidates.value" :key="'g' + g" class="warn" @click="c.doAnGang(g)">
           暗杠 {{ c.tileLabel(g) }}
         </button>
-        <button
-          v-for="g in c.buGangCandidates.value"
-          :key="'bg' + g"
-          class="warn"
-          @click="c.doBuGang(g)"
-        >
+        <button v-for="g in c.buGangCandidates.value" :key="'bg' + g" class="warn" @click="c.doBuGang(g)">
           补杠 {{ c.tileLabel(g) }}
         </button>
       </template>
@@ -166,77 +172,135 @@ function seatMelds(seatId: number): HzmjMeld[] {
 
 <style scoped>
 .panel {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 10px;
+  background: linear-gradient(160deg, #14523c 0%, #0f3d2e 45%, #0a2a20 100%);
+  color: #e8f2ec;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  padding: 12px;
   font-size: 12px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
 }
-.panel.active { box-shadow: 0 0 0 2px #f59e0b; }
-.panel.claim { box-shadow: 0 0 0 2px #0f766e; }
+.panel.active { box-shadow: 0 0 0 2px #e8c547, 0 10px 24px rgba(0, 0, 0, 0.28); }
+.panel.claim { box-shadow: 0 0 0 2px #34d399, 0 10px 24px rgba(0, 0, 0, 0.28); }
 .ph { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
 .pos {
-  background: #0f766e;
-  color: #fff;
+  background: #e8c547;
+  color: #2a2108;
   padding: 1px 7px;
   border-radius: 4px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .dev {
-  color: #64748b;
+  color: #9db5a8;
   font-family: ui-monospace, Consolas, monospace;
-  max-width: 180px;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.meta { color: #64748b; }
-.tag { background: #b45309; color: #fff; padding: 1px 6px; border-radius: 4px; font-size: 11px; }
-.err { background: #fef2f2; color: #b91c1c; padding: 4px 8px; border-radius: 4px; margin-bottom: 6px; }
-.row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-.cd { background: #fef3c7; color: #b45309; padding: 4px 8px; border-radius: 999px; display: inline-block; margin-bottom: 6px; }
-.disc { font-weight: 600; margin-bottom: 6px; }
-.seats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
-.mini { border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 6px; background: #f8fafc; }
-.mini.me { border-color: #0f766e; background: #f0fdfa; }
-.mini.turn { box-shadow: 0 0 0 1px #f59e0b; }
-.melds, .river { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
-.mg { background: #e2e8f0; border-radius: 4px; padding: 1px 3px; margin-right: 4px; }
-.mg i, .river i { font-style: normal; border: 1px solid #cbd5e1; background: #fff; padding: 0 3px; border-radius: 3px; margin-left: 1px; }
-.lp { min-height: 1em; font-weight: 600; }
-.hand-label { color: #64748b; margin-top: 4px; }
-.hand { display: flex; flex-wrap: wrap; gap: 4px; min-height: 36px; }
-.tile {
-  border: 1px solid #cbd5e1;
-  background: #f8fafc;
+.meta { color: #9db5a8; }
+.tag {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  padding: 1px 6px;
   border-radius: 4px;
-  padding: 4px 6px;
-  cursor: pointer;
-  color: #0f172a;
+  font-size: 11px;
+  font-weight: 700;
 }
-.tile.on { background: #0f766e; color: #fff; border-color: #0f766e; }
-.tile.cai { border-color: #f59e0b; }
+.err { background: rgba(185, 28, 28, 0.25); color: #ffb4b4; padding: 4px 8px; border-radius: 6px; margin-bottom: 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; align-items: center; }
+.cd {
+  background: rgba(232, 197, 71, 0.15);
+  color: #e8c547;
+  border: 1px solid rgba(232, 197, 71, 0.35);
+  padding: 4px 10px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-bottom: 6px;
+}
+.disc { font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.seats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+.mini {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.mini.me { border-color: rgba(232, 197, 71, 0.45); }
+.mini.turn { box-shadow: 0 0 0 1px #e8c547; }
+.melds, .river { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.mg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 1px 3px;
+  margin-right: 2px;
+}
+.lp { min-height: 1em; font-weight: 700; }
+.hand-label { color: #9db5a8; margin-top: 4px; }
+.hand { display: flex; flex-wrap: wrap; gap: 5px; min-height: 52px; }
+.mtile {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 56px;
+  border: 0;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #fffef8 0%, #efe9da 100%);
+  color: #1a1a1a;
+  box-shadow: 0 2px 0 #c4bba6, 0 4px 10px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  padding: 0;
+  font-style: normal;
+  font-weight: 700;
+}
+.mtile.sm, .mtile.xs {
+  width: auto;
+  min-width: 26px;
+  height: 30px;
+  padding: 0 4px;
+  font-size: 11px;
+  cursor: default;
+}
+.mtile .num { font-size: 14px; font-weight: 800; line-height: 1; }
+.mtile .kind { font-size: 11px; line-height: 1; }
+.mtile.wan { color: #1d4ed8; }
+.mtile.tiao { color: #15803d; }
+.mtile.tong { color: #c2410c; }
+.mtile.zi { color: #111827; }
+.mtile.cai { background: linear-gradient(180deg, #fff7d6, #fde68a); box-shadow: 0 0 0 2px #f59e0b, 0 2px 0 #c4bba6; }
+.mtile.an { background: #1e293b; color: #e2e8f0; }
+.mtile.on { outline: 2px solid #e8c547; outline-offset: 1px; transform: translateY(-6px); }
 button {
   border: 0;
-  background: #0f766e;
-  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8f2ec;
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 12px;
 }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost { background: #e2e8f0; color: #334155; }
-button.warn { background: #c2410c; }
-.hint { color: #b45309; align-self: center; }
-.settle { background: #ecfdf5; padding: 6px; border-radius: 6px; margin-top: 6px; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
+}
+button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); }
+button.warn { background: #c2410c; color: #fff; font-weight: 700; }
+.hint { color: #fbbf24; }
+.settle { background: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 6px; margin-top: 6px; }
 .log {
   margin: 8px 0 0;
   max-height: 90px;
   overflow: auto;
-  background: #0f172a;
-  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.28);
+  color: #b7cfc2;
   padding: 6px;
   border-radius: 6px;
   font-size: 10px;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PhzLabPanel from './PhzLabPanel.vue'
 
@@ -44,6 +44,8 @@ function setPanel(el: unknown, i: number) {
   if (el) panels.value[i] = el as InstanceType<typeof PhzLabPanel>
 }
 
+const canLeaveAll = computed(() => panels.value.some((p) => p && (p.roomId || p.matching)))
+
 async function bootAll() {
   booting.value = true
   try {
@@ -73,20 +75,39 @@ async function readyAll() {
   }
 }
 
+function leaveAll() {
+  for (const p of panels.value) {
+    if (p) p.leave()
+  }
+}
+
+function backLobby() {
+  leaveAll()
+  router.push('/lobby')
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
+
+onMounted(async () => {
+  await nextTick()
+  await bootAll()
+})
 </script>
 
 <template>
   <div class="lab">
     <header class="bar">
-      <h1>跑胡子三联调试</h1>
+      <div>
+        <h1>跑胡子 · 三联调试</h1>
+        <p class="tip">进入后自动登录三人；硬件码写入 d0–d2，刷新同一游客。</p>
+      </div>
       <div class="actions">
-        <button :disabled="booting" @click="bootAll">一键登录</button>
-        <button @click="matchAll">一键匹配</button>
-        <button @click="readyAll">一键准备</button>
-        <router-link to="/lobby">回大厅</router-link>
+        <button class="primary" :disabled="booting" @click="matchAll">一键匹配</button>
+        <button class="primary" @click="readyAll">全体准备</button>
+        <button class="ghost" :disabled="!canLeaveAll" @click="leaveAll">全部离开</button>
+        <button class="ghost" @click="backLobby">返回大厅</button>
       </div>
     </header>
     <div class="grid">
@@ -99,44 +120,35 @@ function sleep(ms: number) {
 
 <style scoped>
 .lab {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  min-height: 100vh;
+  padding: 16px 18px 24px;
+  background:
+    radial-gradient(ellipse at top, rgba(55, 85, 55, 0.5), transparent 55%),
+    linear-gradient(180deg, #1a2e1c 0%, #0d1610 100%);
+  color: #e8f2ec;
 }
 .bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 12px;
 }
-.bar h1 {
-  margin: 0;
-  font-size: 20px;
-}
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
+.bar h1 { margin: 0; font-size: 1.4rem; }
+.tip { margin: 4px 0 0; color: #9db5a8; font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   grid-template-areas:
     's2 s1'
     's0 s0';
-  gap: 10px;
+  gap: 12px;
 }
-.s2 {
-  grid-area: s2;
-}
-.s1 {
-  grid-area: s1;
-}
-.s0 {
-  grid-area: s0;
-}
+.s2 { grid-area: s2; }
+.s1 { grid-area: s1; }
+.s0 { grid-area: s0; }
 @media (max-width: 900px) {
   .grid {
     grid-template-columns: 1fr;
@@ -146,4 +158,19 @@ function sleep(ms: number) {
       's2';
   }
 }
+button {
+  border: 0;
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8f2ec;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.45; }
+button.primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
+}
+button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.22); }
 </style>

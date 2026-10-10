@@ -19,11 +19,13 @@ struct SeatCannon {
   float y{0};
 };
 
+// Seat layout (W=1920,H=1080, origin bottom-left): bottom x2, top x2, no overlap.
+// 0 bottom-left, 1 bottom-right, 2 top-left, 3 top-right.
 inline const SeatCannon kSeatCannonPos[kMaxSeats] = {
-    {480.f, 60.f},
-    {960.f, 60.f},
-    {1440.f, 60.f},
-    {960.f, 160.f},
+    {420.f, 70.f},
+    {1500.f, 70.f},
+    {420.f, 1050.f},
+    {1500.f, 1050.f},
 };
 
 struct FireRequest {
@@ -112,6 +114,7 @@ struct SeatState {
   bool left{false};
   int64_t last_fire_ms{-1000000};
   std::unordered_set<int64_t> seen_seq;
+  int64_t max_client_seq{0};
 };
 
 class FishTable {
