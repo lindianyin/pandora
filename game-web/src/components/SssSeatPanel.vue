@@ -1,0 +1,418 @@
+<script setup lang="ts">
+import type { createSssLabClient } from '../composables/createSssLabClient'
+import type { BijiCardFace } from '../net/frame'
+
+type Client = ReturnType<typeof createSssLabClient>
+
+const props = defineProps<{
+  client: Client
+  deviceId: string
+  compact?: boolean
+}>()
+
+function onPoolClick(card: BijiCardFace) {
+  props.client.toggleSelect(card.id)
+}
+
+function onDunCard(zone: 'head' | 'mid' | 'tail', card: BijiCardFace) {
+  props.client.takeFrom(zone, card.id)
+}
+
+function onDunZone(zone: 'head' | 'mid' | 'tail') {
+  props.client.placeTo(zone)
+}
+</script>
+
+<template>
+  <section class="seat" :class="{ compact }">
+    <header class="seat-head">
+      <div>
+        <h2>{{ client.label }} · {{ client.nickname.value }}</h2>
+        <p class="meta">
+          uid {{ client.uid.value }} · 金币 {{ client.gold.value }} · 房间
+          {{ client.roomId.value || '-' }} · 局号 {{ client.roundId.value || '-' }} ·
+          {{ client.roomPhase.value || 'idle' }}
+        </p>
+        <p v-if="!compact" class="hw">{{ deviceId }}</p>
+      </div>
+      <div v-if="client.arranging.value || client.remainS.value > 0" class="timer">
+        <span class="timer-label">摆牌</span>
+        <strong>{{ client.remainS.value }}</strong>
+        <span>秒</span>
+      </div>
+    </header>
+
+    <p v-if="client.errorBanner.value" class="err">{{ client.errorBanner.value }}</p>
+    <p v-else-if="client.settleText.value" class="settle">结算 {{ client.settleText.value }}</p>
+    <p v-else-if="client.compareText.value" class="compare">{{ client.compareText.value }}</p>
+    <p
+      v-else-if="client.arranging.value"
+      class="hint"
+      :class="{
+        bad: client.complete.value && !client.canConfirmLegal.value,
+        ok: client.canConfirmLegal.value,
+      }"
+    >
+      {{ client.arrangeHint.value }}
+    </p>
+    <p v-else-if="client.locked.value" class="hint ok">已确认，等待比牌…</p>
+
+    <label v-if="client.canReportSpecial.value" class="special">
+      <input v-model="client.reportSpecial.value" type="checkbox" :disabled="client.locked.value" />
+      <span>申报特殊牌型</span>
+      <strong class="stype">{{ client.specialTypeLabel.value }}</strong>
+    </label>
+
+    <div class="duns">
+      <div
+        class="dun"
+        :class="{ active: client.selected.value != null && client.head.value.length < client.HEAD_N }"
+        @click="onDunZone('head')"
+      >
+        <div class="dun-title">
+          <span>头墩</span>
+          <em>3张</em>
+        </div>
+        <div class="slots">
+          <button
+            v-for="card in client.headFaces.value"
+            :key="'h' + card.id"
+            type="button"
+            class="card"
+            :class="{ red: card.red }"
+            :disabled="client.locked.value"
+            @click.stop="onDunCard('head', card)"
+          >
+            <span class="rank">{{ card.rank }}</span>
+            <span class="suit">{{ card.suit }}</span>
+          </button>
+          <div v-for="n in client.HEAD_N - client.headFaces.value.length" :key="'he' + n" class="slot" />
+        </div>
+      </div>
+      <div
+        class="dun"
+        :class="{ active: client.selected.value != null && client.mid.value.length < client.MID_N }"
+        @click="onDunZone('mid')"
+      >
+        <div class="dun-title">
+          <span>中墩</span>
+          <em>5张</em>
+        </div>
+        <div class="slots slots-wide">
+          <button
+            v-for="card in client.midFaces.value"
+            :key="'m' + card.id"
+            type="button"
+            class="card"
+            :class="{ red: card.red }"
+            :disabled="client.locked.value"
+            @click.stop="onDunCard('mid', card)"
+          >
+            <span class="rank">{{ card.rank }}</span>
+            <span class="suit">{{ card.suit }}</span>
+          </button>
+          <div v-for="n in client.MID_N - client.midFaces.value.length" :key="'me' + n" class="slot" />
+        </div>
+      </div>
+      <div
+        class="dun tail"
+        :class="{ active: client.selected.value != null && client.tail.value.length < client.TAIL_N }"
+        @click="onDunZone('tail')"
+      >
+        <div class="dun-title">
+          <span>尾墩</span>
+          <em>5张</em>
+        </div>
+        <div class="slots slots-wide">
+          <button
+            v-for="card in client.tailFaces.value"
+            :key="'t' + card.id"
+            type="button"
+            class="card"
+            :class="{ red: card.red }"
+            :disabled="client.locked.value"
+            @click.stop="onDunCard('tail', card)"
+          >
+            <span class="rank">{{ card.rank }}</span>
+            <span class="suit">{{ card.suit }}</span>
+          </button>
+          <div v-for="n in client.TAIL_N - client.tailFaces.value.length" :key="'te' + n" class="slot" />
+        </div>
+      </div>
+    </div>
+
+    <div class="pool-wrap">
+      <div class="pool-title">{{ compact ? '手牌 · 点牌再点墩' : '手牌区 · 先点牌再点墩位放入 · 点墩内牌可取回' }}</div>
+      <div class="pool">
+        <button
+          v-for="card in client.poolFaces.value"
+          :key="'p' + card.id"
+          type="button"
+          class="card"
+          :class="{ red: card.red, selected: client.selected.value === card.id }"
+          :disabled="client.locked.value"
+          @click="onPoolClick(card)"
+        >
+          <span class="rank">{{ card.rank }}</span>
+          <span class="suit">{{ card.suit }}</span>
+        </button>
+        <span v-if="!client.poolFaces.value.length && client.arranging.value" class="empty">手牌已全部入墩</span>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="primary" :disabled="!client.canConfirmLegal.value" @click="client.confirmArrange()">
+        确认摆牌
+      </button>
+      <button :disabled="!client.arranging.value" @click="client.smartFill()">智能摆牌</button>
+      <button :disabled="!client.arranging.value" @click="client.clearBoard()">清空重摆</button>
+      <button :disabled="!client.arranging.value" @click="client.oneClickConfirm()">智能摆牌一键确认</button>
+      <button :disabled="!client.canMatch.value" @click="client.oneClickMatch()">匹配</button>
+      <button :disabled="!client.canReady.value" @click="client.oneClickReady()">准备</button>
+      <button @click="client.topupGold()">加币</button>
+      <button class="ghost" @click="client.oneClickLeave()">离开</button>
+    </div>
+
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre class="log">{{ client.logs.value.join('\n') || '（暂无）' }}</pre>
+    </details>
+  </section>
+</template>
+
+<style scoped>
+.seat {
+  --felt: #0f3d2e;
+  --felt-edge: #0a2a20;
+  --ink: #f3f7f4;
+  --muted: #9db5a8;
+  --gold: #e8c547;
+  --danger: #ff8a80;
+  --card-w: 40px;
+  --card-h: 56px;
+  background: linear-gradient(160deg, #14523c 0%, var(--felt) 45%, var(--felt-edge) 100%);
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.seat.compact {
+  --card-w: 30px;
+  --card-h: 42px;
+  padding: 6px 7px;
+  gap: 4px;
+  border-radius: 8px;
+}
+.seat-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: flex-start;
+}
+.seat-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.seat.compact .seat-head h2 { font-size: 0.82rem; }
+.meta, .hw {
+  margin: 1px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.seat.compact .meta { font-size: 10px; }
+.hw { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+.timer {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(232, 197, 71, 0.45);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--gold);
+  white-space: nowrap;
+}
+.timer strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.seat.compact .timer strong { font-size: 0.95rem; }
+.timer-label { font-size: 11px; opacity: 0.85; }
+.hint { margin: 0; font-size: 12px; color: #d7e8de; }
+.seat.compact .hint { font-size: 11px; }
+.hint.bad { color: var(--danger); }
+.hint.ok { color: #9be7c4; }
+.err { margin: 0; color: var(--danger); font-size: 12px; }
+.settle { margin: 0; color: var(--gold); font-size: 12px; }
+.compare { margin: 0; color: #b8e0ff; font-size: 11px; line-height: 1.3; }
+.special {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.special .stype {
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 13px;
+}
+.duns {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.seat.compact .duns { gap: 3px; }
+.dun {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 5px 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.seat.compact .dun {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  border-radius: 6px;
+}
+.dun.active {
+  border-color: var(--gold);
+  background: rgba(232, 197, 71, 0.12);
+}
+.dun.tail { border-style: solid; border-color: rgba(232, 197, 71, 0.28); }
+.dun-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.seat.compact .dun-title {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: 0;
+  min-width: 28px;
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 1.2;
+}
+.dun-title em { font-style: normal; color: #cfe7da; }
+.seat.compact .dun-title em { display: none; }
+.slots {
+  display: flex;
+  gap: 4px;
+  min-height: var(--card-h);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.slot {
+  width: var(--card-w);
+  height: var(--card-h);
+  border-radius: 5px;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+}
+.pool-wrap {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 8px;
+  padding: 5px 6px 6px;
+}
+.seat.compact .pool-wrap { padding: 3px 5px 4px; border-radius: 6px; }
+.pool-title {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.seat.compact .pool-title { font-size: 10px; margin-bottom: 2px; }
+.pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: var(--card-h);
+  align-items: center;
+}
+.seat.compact .pool { gap: 3px; }
+.empty { font-size: 11px; color: var(--muted); }
+.card {
+  width: var(--card-w);
+  height: var(--card-h);
+  border: 0;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #fffef8 0%, #f2efe6 100%);
+  color: #1a1a1a;
+  box-shadow: 0 1px 0 #c9c2b0, 0 3px 8px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.card:hover:not(:disabled) { transform: translateY(-2px); }
+.card:disabled { cursor: default; opacity: 0.85; }
+.card.red { color: #c62828; }
+.card.selected {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+  transform: translateY(-2px);
+}
+.card .rank { font-size: 13px; font-weight: 800; line-height: 1; }
+.card .suit { font-size: 14px; line-height: 1; }
+.seat.compact .card .rank { font-size: 11px; }
+.seat.compact .card .suit { font-size: 12px; }
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.actions button {
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--ink);
+  cursor: pointer;
+}
+.seat.compact .actions button { padding: 3px 6px; font-size: 11px; border-radius: 5px; }
+.actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.actions .primary {
+  background: linear-gradient(180deg, #f0d36a, #c9a227);
+  color: #2a2108;
+  font-weight: 700;
+}
+.actions .ghost { background: transparent; border: 1px solid rgba(255,255,255,0.2); }
+.log-box {
+  margin: 0;
+  font-size: 11px;
+  color: #b7cfc2;
+}
+.log-box summary {
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+}
+.seat.compact .log-box summary { font-size: 10px; }
+.log {
+  margin: 4px 0 0;
+  max-height: 88px;
+  overflow: auto;
+  font-size: 11px;
+  color: #b7cfc2;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 4px 6px;
+  white-space: pre-wrap;
+}
+.seat.compact .log { max-height: 52px; font-size: 10px; padding: 3px 5px; }
+</style>

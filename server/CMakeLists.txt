@@ -26,6 +26,7 @@ set(PROTO_FILES
   "${PROTO_DIR}/game_phz.proto"
   "${PROTO_DIR}/game_fish.proto"
   "${PROTO_DIR}/game_biji.proto"
+  "${PROTO_DIR}/game_sss.proto"
   "${PROTO_DIR}/activity.proto"
   "${PROTO_DIR}/social.proto"
   "${PROTO_DIR}/bag.proto"
@@ -39,6 +40,7 @@ set(GENERATED_SRCS
   "${GENERATED_DIR}/game_phz.pb.cc"
   "${GENERATED_DIR}/game_fish.pb.cc"
   "${GENERATED_DIR}/game_biji.pb.cc"
+  "${GENERATED_DIR}/game_sss.pb.cc"
   "${GENERATED_DIR}/activity.pb.cc"
   "${GENERATED_DIR}/social.pb.cc"
   "${GENERATED_DIR}/bag.pb.cc"
@@ -51,6 +53,7 @@ set(GENERATED_HDRS
   "${GENERATED_DIR}/game_phz.pb.h"
   "${GENERATED_DIR}/game_fish.pb.h"
   "${GENERATED_DIR}/game_biji.pb.h"
+  "${GENERATED_DIR}/game_sss.pb.h"
   "${GENERATED_DIR}/activity.pb.h"
   "${GENERATED_DIR}/social.pb.h"
   "${GENERATED_DIR}/bag.pb.h"
@@ -104,6 +107,11 @@ add_executable(pandora-server
   src/game/biji/hand.cpp
   src/game/biji/settle.cpp
   src/game/biji/table.cpp
+  src/game/sss/sss_room_game.cpp
+  src/game/sss/hand.cpp
+  src/game/sss/special.cpp
+  src/game/sss/settle.cpp
+  src/game/sss/table.cpp
   src/game/ddz_cards.cpp
   src/game/hzmj/tiles.cpp
   src/game/hzmj/meld.cpp
@@ -215,6 +223,23 @@ add_executable(biji_table_test
   src/game/biji/table.cpp
 )
 target_include_directories(biji_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(sss_hand_test
+  tests/sss_hand_test.cpp
+  src/game/sss/hand.cpp
+  src/game/sss/special.cpp
+  src/game/sss/settle.cpp
+)
+target_include_directories(sss_hand_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_executable(sss_table_test
+  tests/sss_table_test.cpp
+  src/game/sss/hand.cpp
+  src/game/sss/special.cpp
+  src/game/sss/settle.cpp
+  src/game/sss/table.cpp
+)
+target_include_directories(sss_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 add_custom_command(TARGET pandora-server POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:pandora-server>/conf

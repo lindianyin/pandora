@@ -65,6 +65,14 @@ enum class Err : int32_t {
   kBijiBadSeat = 6000005,
   kBijiNotStarted = 6000006,
 
+  kSssIllegalArrange = 7000001,
+  kSssDaoShui = 7000002,
+  kSssAlreadyLocked = 7000003,
+  kSssBadPhase = 7000004,
+  kSssBadSeat = 7000005,
+  kSssNotStarted = 7000006,
+  kSssBadSpecial = 7000007,
+
   kInternal = 90001,
 };
 
@@ -158,6 +166,20 @@ inline const char* ErrMessage(Err e) {
       return "bad seat";
     case Err::kBijiNotStarted:
       return "not started";
+    case Err::kSssIllegalArrange:
+      return "illegal arrange";
+    case Err::kSssDaoShui:
+      return "dao shui";
+    case Err::kSssAlreadyLocked:
+      return "already locked";
+    case Err::kSssBadPhase:
+      return "bad phase";
+    case Err::kSssBadSeat:
+      return "bad seat";
+    case Err::kSssNotStarted:
+      return "not started";
+    case Err::kSssBadSpecial:
+      return "invalid special report";
     case Err::kInternal:
     default:
       return "internal error";
@@ -252,6 +274,16 @@ constexpr uint32_t kS2C_BijiSettle = 600006;
 constexpr uint32_t kS2C_BijiSnapshot = 600007;
 constexpr uint32_t kC2S_BijiReady = 600008;
 constexpr uint32_t kC2S_BijiLeave = 600009;
+
+constexpr uint32_t kS2C_SssGameStart = 700001;
+constexpr uint32_t kS2C_SssArrangeState = 700002;
+constexpr uint32_t kC2S_SssArrange = 700003;
+constexpr uint32_t kS2C_SssArrangeAck = 700004;
+constexpr uint32_t kS2C_SssCompare = 700005;
+constexpr uint32_t kS2C_SssSettle = 700006;
+constexpr uint32_t kS2C_SssSnapshot = 700007;
+constexpr uint32_t kC2S_SssReady = 700008;
+constexpr uint32_t kC2S_SssLeave = 700009;
 
 constexpr uint32_t kC2S_ClientTrace = 9001;
 }  // namespace MsgId

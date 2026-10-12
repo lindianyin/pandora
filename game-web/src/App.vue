@@ -9,11 +9,13 @@ const feltPaths = new Set([
   '/hzmj-table',
   '/phz-table',
   '/biji',
+  '/sss',
   '/hzmj-lab',
   '/ddz-lab',
   '/phz-lab',
   '/fish-lab',
   '/biji-lab',
+  '/sss-lab',
   '/fish',
 ])
 

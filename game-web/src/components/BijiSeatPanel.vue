@@ -30,7 +30,8 @@ function onDunZone(zone: 'head' | 'mid' | 'tail') {
         <h2>{{ client.label }} · {{ client.nickname.value }}</h2>
         <p class="meta">
           uid {{ client.uid.value }} · 金币 {{ client.gold.value }} · 房间
-          {{ client.roomId.value || '-' }} · {{ client.roomPhase.value || 'idle' }}
+          {{ client.roomId.value || '-' }} · 局号 {{ client.roundId.value || '-' }} ·
+          {{ client.roomPhase.value || 'idle' }}
         </p>
         <p class="hw">{{ deviceId }}</p>
       </div>
@@ -162,7 +163,10 @@ function onDunZone(zone: 'head' | 'mid' | 'tail') {
       <button class="ghost" @click="client.oneClickLeave()">离开</button>
     </div>
 
-    <pre v-if="!compact" class="log">{{ client.logs.value.join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre class="log">{{ client.logs.value.join('\n') || '（暂无）' }}</pre>
+    </details>
   </section>
 </template>
 
@@ -325,8 +329,19 @@ function onDunZone(zone: 'head' | 'mid' | 'tail') {
   font-weight: 700;
 }
 .actions .ghost { background: transparent; border: 1px solid rgba(255,255,255,0.2); }
-.log {
+.log-box {
   margin: 0;
+  font-size: 11px;
+  color: #b7cfc2;
+}
+.log-box summary {
+  cursor: pointer;
+  color: var(--muted);
+  user-select: none;
+}
+.seat.compact .log-box summary { font-size: 10px; }
+.log {
+  margin: 4px 0 0;
   max-height: 88px;
   overflow: auto;
   font-size: 11px;
@@ -336,6 +351,7 @@ function onDunZone(zone: 'head' | 'mid' | 'tail') {
   padding: 6px 8px;
   white-space: pre-wrap;
 }
+.seat.compact .log { max-height: 52px; font-size: 10px; padding: 3px 5px; }
 @media (max-width: 720px) {
   .duns { grid-template-columns: 1fr; }
 }

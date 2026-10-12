@@ -106,7 +106,7 @@ function faceText(m: HzmjMeld, t: number) {
         <h1>杭州麻将</h1>
         <p>
           {{ nickname }} · 金币 {{ gold }} · 房间 #{{ roomId || '-' }} · 余牌 {{ hzmjWall }} · N={{ hzmjN }}
-          · 局 {{ hzmjRoundId || '-' }} · 连庄 {{ hzmjLian }}
+          · 局号 {{ hzmjRoundId || '-' }} · 连庄 {{ hzmjLian }}
         </p>
       </div>
       <div class="top-actions">
@@ -328,9 +328,9 @@ function faceText(m: HzmjMeld, t: number) {
       </div>
     </div>
 
-    <details class="log-box">
-      <summary>日志</summary>
-      <pre>{{ logs.join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre>{{ logs.join('\n') || '（暂无）' }}</pre>
     </details>
 
     <div v-if="showHzmjSettle && hzmjSettle" class="modal-mask">

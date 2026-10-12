@@ -25,8 +25,9 @@ onMounted(() => {
         <h1>跑胡子</h1>
         <p>
           {{ c.nickname.value || '玩家' }} · 金币 {{ c.gold.value }}
+          · 局号 {{ c.phzRoundId.value || '-' }}
           <template v-if="c.phzRoundId.value">
-            · 局 {{ c.phzRoundId.value }} · 庄 seat{{ c.phzBanker.value }} · 墩 {{ c.phzWall.value }}
+            · 庄 seat{{ c.phzBanker.value }} · 墩 {{ c.phzWall.value }}
             · {{ c.phzSub.value }} · {{ c.countdown.value }}s
           </template>
         </p>
@@ -131,10 +132,11 @@ onMounted(() => {
       </div>
     </div>
 
-    <details class="log-box">
-      <summary>日志</summary>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
       <ul>
         <li v-for="(line, i) in c.logs.value" :key="i">{{ line }}</li>
+        <li v-if="!c.logs.value.length">（暂无）</li>
       </ul>
     </details>
   </div>

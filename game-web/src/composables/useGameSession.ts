@@ -156,6 +156,7 @@ function resolveGameId(templateId: number): number {
   if (templateId === 3) return 4000
   if (templateId === 4) return 5000
   if (templateId === 5) return 6000
+  if (templateId === 6) return 7000
   return 2000
 }
 
@@ -164,6 +165,7 @@ function tablePathForGame(gameId: number) {
   if (gameId === 4000 || gameId === 3) return '/phz-table'
   if (gameId === 5000 || gameId === 4) return '/fish'
   if (gameId === 6000 || gameId === 5) return '/biji'
+  if (gameId === 7000 || gameId === 6) return '/sss'
   return '/table'
 }
 

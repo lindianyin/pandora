@@ -6,6 +6,7 @@
 #include <game_ddz.pb.h>
 #include <game_hzmj.pb.h>
 #include <game_biji.pb.h>
+#include <game_sss.pb.h>
 #include <game_fish.pb.h>
 #include <game_phz.pb.h>
 #include <lobby.pb.h>
@@ -707,6 +708,118 @@ std::vector<uint8_t> EncodeS2C_BijiSnapshot(const BijiSnapshotData& data) {
   m.set_has_draft(data.has_draft);
   m.set_locked(data.locked);
   for (bool v : data.others_locked) m.add_others_locked(v);
+  return Serialize(m);
+}
+
+bool DecodeC2S_SssArrange(const uint8_t* data, size_t len, std::vector<int32_t>& head, std::vector<int32_t>& mid,
+                          std::vector<int32_t>& tail, bool& report_special, bool& confirm) {
+  C2S_SssArrange m;
+  if (!Parse(data, len, m)) return false;
+  head.assign(m.head().begin(), m.head().end());
+  mid.assign(m.mid().begin(), m.mid().end());
+  tail.assign(m.tail().begin(), m.tail().end());
+  report_special = m.report_special();
+  confirm = m.confirm();
+  return true;
+}
+
+std::vector<uint8_t> EncodeS2C_SssGameStart(const SssGameStartData& data) {
+  S2C_SssGameStart m;
+  m.set_round_id(data.round_id);
+  m.set_room_id(data.room_id);
+  m.set_template_id(data.template_id);
+  m.set_self_seat(data.self_seat);
+  m.set_players(data.players);
+  m.set_deal_start(data.deal_start);
+  m.set_base_score(data.base_score);
+  m.set_arrange_timeout_s(data.arrange_timeout_s);
+  for (auto c : data.hand) m.add_hand(c);
+  m.set_enable_special(data.enable_special);
+  m.set_enable_shoot(data.enable_shoot);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_SssArrangeState(const SssArrangeStateData& data) {
+  S2C_SssArrangeState m;
+  for (bool v : data.locked) m.add_locked(v);
+  for (bool v : data.trusteeship) m.add_trusteeship(v);
+  for (bool v : data.reported) m.add_reported(v);
+  m.set_remain_s(data.remain_s);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_SssArrangeAck(int32_t code, const std::string& message, bool locked) {
+  S2C_SssArrangeAck m;
+  m.set_code(code);
+  m.set_message(message);
+  m.set_locked(locked);
+  return Serialize(m);
+}
+
+namespace {
+
+void FillSssDun(::pandora::SssDun* d, const SssDunData& src) {
+  for (auto c : src.cards) d->add_cards(c);
+  d->set_type(src.type);
+}
+
+void FillSssCompareSeat(::pandora::SssSeatCompare* s, const SssSeatCompareData& src) {
+  s->set_seat_id(src.seat_id);
+  s->set_uid(src.uid);
+  FillSssDun(s->mutable_head(), src.head);
+  FillSssDun(s->mutable_mid(), src.mid);
+  FillSssDun(s->mutable_tail(), src.tail);
+  s->set_special_type(src.special_type);
+  s->set_home_run(src.home_run);
+}
+
+void FillSssSettleSeat(::pandora::SssSeatSettle* s, const SssSeatSettleData& src) {
+  s->set_seat_id(src.seat_id);
+  s->set_uid(src.uid);
+  s->set_gross_water(src.gross_water);
+  s->set_gross_gold(src.gross_gold);
+  s->set_rake(src.rake);
+  s->set_net(src.net);
+  s->set_gold(src.gold);
+  s->set_special_type(src.special_type);
+  s->set_home_run(src.home_run);
+}
+
+}  // namespace
+
+std::vector<uint8_t> EncodeS2C_SssCompare(const SssCompareData& data) {
+  S2C_SssCompare m;
+  m.set_round_id(data.round_id);
+  for (const auto& s : data.seats) FillSssCompareSeat(m.add_seats(), s);
+  for (const auto& sh : data.shoots) {
+    auto* p = m.add_shoots();
+    p->set_from_seat(sh.from_seat);
+    p->set_to_seat(sh.to_seat);
+  }
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_SssSettle(const SssSettleData& data) {
+  S2C_SssSettle m;
+  m.set_round_id(data.round_id);
+  for (const auto& s : data.seats) FillSssSettleSeat(m.add_seats(), s);
+  return Serialize(m);
+}
+
+std::vector<uint8_t> EncodeS2C_SssSnapshot(const SssSnapshotData& data) {
+  S2C_SssSnapshot m;
+  m.set_phase(data.phase);
+  m.set_deal_start(data.deal_start);
+  m.set_remain_s(data.remain_s);
+  for (auto c : data.hand) m.add_hand(c);
+  for (auto c : data.draft_head) m.add_draft_head(c);
+  for (auto c : data.draft_mid) m.add_draft_mid(c);
+  for (auto c : data.draft_tail) m.add_draft_tail(c);
+  m.set_has_draft(data.has_draft);
+  m.set_locked(data.locked);
+  m.set_report_special(data.report_special);
+  for (bool v : data.others_locked) m.add_others_locked(v);
+  for (bool v : data.others_reported) m.add_others_reported(v);
   return Serialize(m);
 }
 

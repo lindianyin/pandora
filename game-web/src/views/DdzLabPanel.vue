@@ -48,7 +48,7 @@ function face(id: number) {
       <span v-else>offline</span>
       <span v-if="c.mySeat.value >= 0">座{{ c.mySeat.value }}</span>
       <span v-if="c.landlordSeat.value >= 0 && c.mySeat.value === c.landlordSeat.value" class="tag">地主</span>
-      <span v-if="c.ddzRoundId.value" class="tag">局 {{ c.ddzRoundId.value }}</span>
+      <span class="tag">局号 {{ c.ddzRoundId.value || '-' }}</span>
       <span class="meta">{{ c.roomPhase.value || c.turnPhase.value || '-' }}</span>
     </div>
     <div v-if="c.errorBanner.value" class="err">{{ c.errorBanner.value }}</div>
@@ -135,7 +135,10 @@ function face(id: number) {
       </span>
     </div>
 
-    <pre class="log">{{ c.logs.value.slice(0, 8).join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre class="log">{{ c.logs.value.slice(0, 12).join('\n') || '（暂无）' }}</pre>
+    </details>
   </section>
 </template>
 
@@ -241,8 +244,10 @@ button.primary {
 }
 button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); }
 .settle { background: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 6px; margin-top: 6px; }
+.log-box { margin-top: 6px; font-size: 11px; color: #9db5a8; }
+.log-box summary { cursor: pointer; user-select: none; }
 .log {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   max-height: 90px;
   overflow: auto;
   background: rgba(0, 0, 0, 0.28);
@@ -250,5 +255,6 @@ button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.
   padding: 6px;
   border-radius: 6px;
   font-size: 10px;
+  white-space: pre-wrap;
 }
 </style>

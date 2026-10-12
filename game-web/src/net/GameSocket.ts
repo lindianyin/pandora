@@ -20,6 +20,7 @@ import {
   encodeC2S_FishSetMult,
   encodeC2S_FishLeave,
   encodeC2S_BijiArrange,
+  encodeC2S_SssArrange,
   encodeC2S_ClientTrace,
   decodeS2C_AuthResult,
   decodeS2C_LobbyInfo,
@@ -59,6 +60,12 @@ import {
   decodeS2C_BijiCompare,
   decodeS2C_BijiSettle,
   decodeS2C_BijiSnapshot,
+  decodeS2C_SssGameStart,
+  decodeS2C_SssArrangeState,
+  decodeS2C_SssArrangeAck,
+  decodeS2C_SssCompare,
+  decodeS2C_SssSettle,
+  decodeS2C_SssSnapshot,
   decodeS2C_ActivityUpdate,
   decodeS2C_Error,
   decodeS2C_Kick,
@@ -74,6 +81,9 @@ import {
   type BijiGameStart,
   type BijiArrangeState,
   type BijiSeatSettle,
+  type SssGameStart,
+  type SssArrangeState,
+  type SssSeatSettle,
 } from './frame'
 
 export type GameHandlers = {
@@ -192,6 +202,12 @@ export type GameHandlers = {
   onBijiCompare?: (s: ReturnType<typeof decodeS2C_BijiCompare>) => void
   onBijiSettle?: (s: { round_id: number; seats: BijiSeatSettle[] }) => void
   onBijiSnapshot?: (s: ReturnType<typeof decodeS2C_BijiSnapshot>) => void
+  onSssGameStart?: (s: SssGameStart) => void
+  onSssArrangeState?: (s: SssArrangeState) => void
+  onSssArrangeAck?: (s: { code: number; message: string; locked: boolean }) => void
+  onSssCompare?: (s: ReturnType<typeof decodeS2C_SssCompare>) => void
+  onSssSettle?: (s: { round_id: number; seats: SssSeatSettle[] }) => void
+  onSssSnapshot?: (s: ReturnType<typeof decodeS2C_SssSnapshot>) => void
 }
 
 export class GameSocket {
@@ -282,6 +298,18 @@ export class GameSocket {
 
   bijiArrange(head: number[], mid: number[], tail: number[], confirm: boolean) {
     this.send(MsgId.C2S_BijiArrange, encodeC2S_BijiArrange(head, mid, tail, confirm))
+  }
+  sssArrange(
+    head: number[],
+    mid: number[],
+    tail: number[],
+    reportSpecial: boolean,
+    confirm: boolean,
+  ) {
+    this.send(
+      MsgId.C2S_SssArrange,
+      encodeC2S_SssArrange(head, mid, tail, reportSpecial, confirm),
+    )
   }
   trace(roundId: number, seatId: number, game: string, event: string, detail: string) {
     if (roundId <= 0) return
@@ -488,6 +516,34 @@ export class GameSocket {
     }
     if (msgId === MsgId.S2C_BijiSnapshot) {
       this.handlers.onBijiSnapshot?.(decodeS2C_BijiSnapshot(body))
+      return
+    }
+    if (msgId === MsgId.S2C_SssGameStart) {
+      const r = decodeS2C_SssGameStart(body)
+      this.log(`SssStart seat=${r.self_seat} hand=${r.hand.length}`)
+      this.handlers.onSssGameStart?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_SssArrangeState) {
+      this.handlers.onSssArrangeState?.(decodeS2C_SssArrangeState(body))
+      return
+    }
+    if (msgId === MsgId.S2C_SssArrangeAck) {
+      this.handlers.onSssArrangeAck?.(decodeS2C_SssArrangeAck(body))
+      return
+    }
+    if (msgId === MsgId.S2C_SssCompare) {
+      this.handlers.onSssCompare?.(decodeS2C_SssCompare(body))
+      return
+    }
+    if (msgId === MsgId.S2C_SssSettle) {
+      const r = decodeS2C_SssSettle(body)
+      this.log(`SssSettle seats=${r.seats.length}`)
+      this.handlers.onSssSettle?.(r)
+      return
+    }
+    if (msgId === MsgId.S2C_SssSnapshot) {
+      this.handlers.onSssSnapshot?.(decodeS2C_SssSnapshot(body))
       return
     }
     if (msgId === MsgId.S2C_ActivityUpdate) {

@@ -60,7 +60,7 @@ function face(t: number) {
       <span v-else>offline</span>
       <span v-if="c.mySeat.value >= 0">座{{ c.mySeat.value }}</span>
       <span v-if="c.mySeat.value === c.hzmjBanker.value" class="tag">庄</span>
-      <span v-if="c.hzmjRoundId.value" class="tag">局 {{ c.hzmjRoundId.value }}</span>
+      <span class="tag">局号 {{ c.hzmjRoundId.value || '-' }}</span>
       <span class="meta">{{ c.roomPhase.value || '-' }} · 牌墙 {{ c.hzmjWall.value }} · N={{ c.hzmjN.value }}</span>
     </div>
     <div v-if="c.errorBanner.value" class="err">{{ c.errorBanner.value }}</div>
@@ -166,7 +166,10 @@ function face(t: number) {
       </span>
     </div>
 
-    <pre class="log">{{ c.logs.value.slice(0, 8).join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre class="log">{{ c.logs.value.slice(0, 12).join('\n') || '（暂无）' }}</pre>
+    </details>
   </section>
 </template>
 
@@ -295,8 +298,10 @@ button.ghost { background: transparent; border: 1px solid rgba(255, 255, 255, 0.
 button.warn { background: #c2410c; color: #fff; font-weight: 700; }
 .hint { color: #fbbf24; }
 .settle { background: rgba(0, 0, 0, 0.2); padding: 6px; border-radius: 6px; margin-top: 6px; }
+.log-box { margin-top: 6px; font-size: 11px; color: #9db5a8; }
+.log-box summary { cursor: pointer; user-select: none; }
 .log {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   max-height: 90px;
   overflow: auto;
   background: rgba(0, 0, 0, 0.28);
@@ -304,5 +309,6 @@ button.warn { background: #c2410c; color: #fff; font-weight: 700; }
   padding: 6px;
   border-radius: 6px;
   font-size: 10px;
+  white-space: pre-wrap;
 }
 </style>

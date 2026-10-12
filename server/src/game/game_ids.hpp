@@ -14,6 +14,7 @@ constexpr int32_t kHzmj = 3000;
 constexpr int32_t kPhz = 4000;
 constexpr int32_t kFish = 5000;
 constexpr int32_t kBiji = 6000;
+constexpr int32_t kSss = 7000;
 
 }  // namespace GameId
 
@@ -31,7 +32,9 @@ inline int32_t GameIdOfMsg(uint32_t msg_id) {
 inline bool IsPlayMsg(uint32_t msg_id) { return msg_id >= kPlayMsgMin; }
 
 inline int32_t DefaultSeatsForGame(int32_t game_id) {
-  if (game_id == GameId::kHzmj || game_id == GameId::kFish || game_id == GameId::kBiji) return 4;
+  if (game_id == GameId::kHzmj || game_id == GameId::kFish || game_id == GameId::kBiji ||
+      game_id == GameId::kSss)
+    return 4;
   return 3;
 }
 

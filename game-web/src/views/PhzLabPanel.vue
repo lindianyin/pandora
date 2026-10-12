@@ -50,8 +50,11 @@ defineExpose({
     <div v-if="c.countdown.value > 0 && c.phzSub.value" class="cd">
       {{ c.turnBanner.value }} · {{ c.phzSub.value }} · {{ c.countdown.value }}s
     </div>
-    <div v-if="c.phzRoundId.value" class="meta">
-      局号 {{ c.phzRoundId.value }} · 庄 seat{{ c.phzBanker.value }} · 墩 {{ c.phzWall.value }}
+    <div class="meta">
+      局号 {{ c.phzRoundId.value || '-' }}
+      <template v-if="c.phzRoundId.value">
+        · 庄 seat{{ c.phzBanker.value }} · 墩 {{ c.phzWall.value }}
+      </template>
     </div>
     <div v-if="c.phzReveal.value" class="reveal">
       示众 seat{{ c.phzReveal.value.seat }}：
@@ -122,9 +125,13 @@ defineExpose({
       <p v-else>流局 · 庄 seat{{ c.liujuBanker.value }}</p>
       <button @click="c.dismissSettle()">关闭</button>
     </div>
-    <ul class="logs">
-      <li v-for="(line, i) in c.logs.value" :key="i">{{ line }}</li>
-    </ul>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <ul class="logs">
+        <li v-for="(line, i) in c.logs.value" :key="i">{{ line }}</li>
+        <li v-if="!c.logs.value.length">（暂无）</li>
+      </ul>
+    </details>
   </section>
 </template>
 
@@ -215,14 +222,18 @@ header {
 }
 .meld-group.dark { background: rgba(0, 0, 0, 0.28); }
 .settle { background: rgba(0, 0, 0, 0.2); padding: 8px; border-radius: 8px; }
+.log-box { margin-top: 6px; font-size: 11px; color: #9db5a8; }
+.log-box summary { cursor: pointer; user-select: none; }
 .logs {
   list-style: none;
-  margin: 0;
-  padding: 0;
+  margin: 4px 0 0;
+  padding: 6px;
   max-height: 120px;
   overflow: auto;
   font-size: 11px;
   color: #b7cfc2;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 6px;
 }
 button {
   border: 0;

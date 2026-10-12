@@ -98,7 +98,7 @@ onMounted(() => {
           <div>
             <h2>{{ c.label }} · {{ c.nickname.value || '…' }}</h2>
             <p class="meta">
-              uid {{ c.uid.value || '-' }} · 房 {{ c.roomId.value || '-' }} · 局
+              uid {{ c.uid.value || '-' }} · 房 {{ c.roomId.value || '-' }} · 局号
               {{ c.roundId.value || '-' }} · {{ c.roomPhase.value || 'idle' }}
               <span v-if="c.mySeat.value >= 0"> · 座 {{ c.mySeat.value }}</span>
             </p>
@@ -166,7 +166,10 @@ onMounted(() => {
           <div class="pond-hint" v-if="!c.roundId.value">渔场待命</div>
         </div>
 
-        <pre class="log">{{ c.logs.value.join('\n') }}</pre>
+        <details class="log-box" open>
+          <summary>调试日志</summary>
+          <pre class="log">{{ c.logs.value.join('\n') || '（暂无）' }}</pre>
+        </details>
       </section>
     </div>
   </div>
@@ -336,8 +339,10 @@ onMounted(() => {
   letter-spacing: 0.1em;
   pointer-events: none;
 }
+.log-box { margin-top: 6px; font-size: 11px; color: #7fb0c4; }
+.log-box summary { cursor: pointer; user-select: none; }
 .log {
-  margin: 0;
+  margin: 4px 0 0;
   max-height: 110px;
   overflow: auto;
   font-size: 11px;

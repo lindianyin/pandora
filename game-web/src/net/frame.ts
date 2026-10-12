@@ -75,6 +75,15 @@ import {
   S2C_BijiSettle,
   S2C_BijiSnapshot,
 } from '../gen/game_biji'
+import {
+  C2S_SssArrange,
+  S2C_SssArrangeAck,
+  S2C_SssArrangeState,
+  S2C_SssCompare,
+  S2C_SssGameStart,
+  S2C_SssSettle,
+  S2C_SssSnapshot,
+} from '../gen/game_sss'
 import { S2C_ActivityUpdate } from '../gen/activity'
 
 export const MsgId = {
@@ -145,6 +154,15 @@ export const MsgId = {
   S2C_BijiSnapshot: 600007,
   C2S_BijiReady: 600008,
   C2S_BijiLeave: 600009,
+  S2C_SssGameStart: 700001,
+  S2C_SssArrangeState: 700002,
+  C2S_SssArrange: 700003,
+  S2C_SssArrangeAck: 700004,
+  S2C_SssCompare: 700005,
+  S2C_SssSettle: 700006,
+  S2C_SssSnapshot: 700007,
+  C2S_SssReady: 700008,
+  C2S_SssLeave: 700009,
   C2S_ClientTrace: 9001,
 } as const
 
@@ -161,6 +179,7 @@ export const GameId = {
   Phz: 4000,
   Fish: 5000,
   Biji: 6000,
+  Sss: 7000,
 } as const
 
 function writeU32LE(buf: Uint8Array, offset: number, value: number) {
@@ -1165,3 +1184,133 @@ export function bijiCardFace(id: number): BijiCardFace {
 }
 
 export const BIJI_DUN_TYPE_LABELS = ['散牌', '对子', '顺子', '同花', '同花顺', '三条'] as const
+
+export type SssGameStart = {
+  round_id: number
+  room_id: number
+  template_id: number
+  self_seat: number
+  players: number
+  deal_start: number
+  base_score: number
+  arrange_timeout_s: number
+  hand: number[]
+  enable_special: boolean
+  enable_shoot: boolean
+}
+
+export type SssArrangeState = {
+  locked: boolean[]
+  trusteeship: boolean[]
+  reported: boolean[]
+  remain_s: number
+}
+
+export type SssSeatSettle = {
+  seat_id: number
+  uid: number
+  gross_water: number
+  gross_gold: number
+  rake: number
+  net: number
+  gold: number
+  special_type: number
+  home_run: boolean
+}
+
+export function encodeC2S_SssArrange(
+  head: number[],
+  mid: number[],
+  tail: number[],
+  reportSpecial: boolean,
+  confirm: boolean,
+): Uint8Array {
+  return C2S_SssArrange.encode({
+    head,
+    mid,
+    tail,
+    report_special: reportSpecial,
+    confirm,
+  }).finish()
+}
+
+export function decodeS2C_SssGameStart(body: Uint8Array): SssGameStart {
+  const m = S2C_SssGameStart.decode(body)
+  return {
+    round_id: m.round_id,
+    room_id: m.room_id,
+    template_id: m.template_id,
+    self_seat: m.self_seat,
+    players: m.players,
+    deal_start: m.deal_start,
+    base_score: m.base_score,
+    arrange_timeout_s: m.arrange_timeout_s,
+    hand: [...m.hand],
+    enable_special: m.enable_special,
+    enable_shoot: m.enable_shoot,
+  }
+}
+
+export function decodeS2C_SssArrangeState(body: Uint8Array): SssArrangeState {
+  const m = S2C_SssArrangeState.decode(body)
+  return {
+    locked: [...m.locked],
+    trusteeship: [...m.trusteeship],
+    reported: [...m.reported],
+    remain_s: m.remain_s,
+  }
+}
+
+export function decodeS2C_SssArrangeAck(body: Uint8Array): {
+  code: number
+  message: string
+  locked: boolean
+} {
+  const m = S2C_SssArrangeAck.decode(body)
+  return { code: m.code, message: m.message, locked: m.locked }
+}
+
+export function decodeS2C_SssCompare(body: Uint8Array) {
+  return S2C_SssCompare.decode(body)
+}
+
+export function decodeS2C_SssSettle(body: Uint8Array): {
+  round_id: number
+  seats: SssSeatSettle[]
+} {
+  const m = S2C_SssSettle.decode(body)
+  return {
+    round_id: m.round_id,
+    seats: m.seats.map((s) => ({
+      seat_id: s.seat_id,
+      uid: s.uid,
+      gross_water: s.gross_water,
+      gross_gold: s.gross_gold,
+      rake: s.rake,
+      net: s.net,
+      gold: s.gold,
+      special_type: s.special_type,
+      home_run: s.home_run,
+    })),
+  }
+}
+
+export function decodeS2C_SssSnapshot(body: Uint8Array) {
+  return S2C_SssSnapshot.decode(body)
+}
+
+/** Reuse poker face helpers for sss (same CardId encoding). */
+export const sssCardLabel = bijiCardLabel
+export const sssCardFace = bijiCardFace
+
+export const SSS_FIVE_TYPE_LABELS = [
+  '乌龙',
+  '对子',
+  '两对',
+  '三条',
+  '顺子',
+  '同花',
+  '葫芦',
+  '铁支',
+  '同花顺',
+] as const

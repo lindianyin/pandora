@@ -282,7 +282,7 @@ function backLobby() {
       <div>
         <h1>捕鱼</h1>
         <p>
-          房间 {{ roomId || '-' }} · 局 {{ roundId || '-' }} · {{ roomPhase || 'idle' }}
+          房间 {{ roomId || '-' }} · 局号 {{ roundId || '-' }} · {{ roomPhase || 'idle' }}
           <span v-if="mySeat >= 0"> · 座 {{ mySeat }}</span>
         </p>
       </div>
@@ -357,9 +357,9 @@ function backLobby() {
       </div>
     </div>
 
-    <details class="log-box">
-      <summary>日志</summary>
-      <pre>{{ logs.join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre>{{ logs.join('\n') || '（暂无）' }}</pre>
     </details>
   </div>
 </template>

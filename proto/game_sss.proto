@@ -1,0 +1,102 @@
+syntax = "proto3";
+package pandora;
+
+message SssDun {
+  repeated int32 cards = 1;
+  int32 type = 2;
+}
+
+message SssSeatCompare {
+  int32 seat_id = 1;
+  int64 uid = 2;
+  SssDun head = 3;
+  SssDun mid = 4;
+  SssDun tail = 5;
+  int32 special_type = 6;
+  bool home_run = 7;
+}
+
+message SssShootPair {
+  int32 from_seat = 1;
+  int32 to_seat = 2;
+}
+
+message SssSeatSettle {
+  int32 seat_id = 1;
+  int64 uid = 2;
+  int32 gross_water = 3;
+  int64 gross_gold = 4;
+  int64 rake = 5;
+  int64 net = 6;
+  int64 gold = 7;
+  int32 special_type = 8;
+  bool home_run = 9;
+}
+
+// msg_id = 700001
+message S2C_SssGameStart {
+  int64 round_id = 1;
+  int64 room_id = 2;
+  int32 template_id = 3;
+  int32 self_seat = 4;
+  int32 players = 5;
+  int32 deal_start = 6;
+  int32 base_score = 7;
+  int32 arrange_timeout_s = 8;
+  repeated int32 hand = 9;
+  bool enable_special = 10;
+  bool enable_shoot = 11;
+}
+
+// msg_id = 700002
+message S2C_SssArrangeState {
+  repeated bool locked = 1;
+  repeated bool trusteeship = 2;
+  repeated bool reported = 3;
+  int32 remain_s = 4;
+}
+
+// msg_id = 700003
+message C2S_SssArrange {
+  repeated int32 head = 1;
+  repeated int32 mid = 2;
+  repeated int32 tail = 3;
+  bool report_special = 4;
+  bool confirm = 5;
+}
+
+// msg_id = 700004
+message S2C_SssArrangeAck {
+  int32 code = 1;
+  string message = 2;
+  bool locked = 3;
+}
+
+// msg_id = 700005
+message S2C_SssCompare {
+  int64 round_id = 1;
+  repeated SssSeatCompare seats = 2;
+  repeated SssShootPair shoots = 3;
+}
+
+// msg_id = 700006
+message S2C_SssSettle {
+  int64 round_id = 1;
+  repeated SssSeatSettle seats = 2;
+}
+
+// msg_id = 700007
+message S2C_SssSnapshot {
+  int32 phase = 1;  // 0 WaitReady 1 Deal 2 Arrange 3 Compare 4 Settle
+  int32 deal_start = 2;
+  int32 remain_s = 3;
+  repeated int32 hand = 4;
+  repeated int32 draft_head = 5;
+  repeated int32 draft_mid = 6;
+  repeated int32 draft_tail = 7;
+  bool has_draft = 8;
+  bool locked = 9;
+  bool report_special = 10;
+  repeated bool others_locked = 11;
+  repeated bool others_reported = 12;
+}

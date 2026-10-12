@@ -266,5 +266,94 @@ std::vector<uint8_t> EncodeS2C_BijiCompare(const BijiCompareData& data);
 std::vector<uint8_t> EncodeS2C_BijiSettle(const BijiSettleData& data);
 std::vector<uint8_t> EncodeS2C_BijiSnapshot(const BijiSnapshotData& data);
 
+struct SssGameStartData {
+  int64_t round_id{0};
+  int64_t room_id{0};
+  int32_t template_id{0};
+  int32_t self_seat{0};
+  int32_t players{4};
+  int32_t deal_start{0};
+  int32_t base_score{100};
+  int32_t arrange_timeout_s{60};
+  std::vector<int32_t> hand;
+  bool enable_special{true};
+  bool enable_shoot{true};
+};
+
+struct SssArrangeStateData {
+  std::vector<bool> locked;
+  std::vector<bool> trusteeship;
+  std::vector<bool> reported;
+  int32_t remain_s{0};
+};
+
+struct SssDunData {
+  std::vector<int32_t> cards;
+  int32_t type{0};
+};
+
+struct SssSeatCompareData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  SssDunData head;
+  SssDunData mid;
+  SssDunData tail;
+  int32_t special_type{0};
+  bool home_run{false};
+};
+
+struct SssShootPairData {
+  int32_t from_seat{0};
+  int32_t to_seat{0};
+};
+
+struct SssSeatSettleData {
+  int32_t seat_id{0};
+  int64_t uid{0};
+  int32_t gross_water{0};
+  int64_t gross_gold{0};
+  int64_t rake{0};
+  int64_t net{0};
+  int64_t gold{0};
+  int32_t special_type{0};
+  bool home_run{false};
+};
+
+struct SssCompareData {
+  int64_t round_id{0};
+  std::vector<SssSeatCompareData> seats;
+  std::vector<SssShootPairData> shoots;
+};
+
+struct SssSettleData {
+  int64_t round_id{0};
+  std::vector<SssSeatSettleData> seats;
+};
+
+struct SssSnapshotData {
+  int32_t phase{0};
+  int32_t deal_start{0};
+  int32_t remain_s{0};
+  std::vector<int32_t> hand;
+  std::vector<int32_t> draft_head;
+  std::vector<int32_t> draft_mid;
+  std::vector<int32_t> draft_tail;
+  bool has_draft{false};
+  bool locked{false};
+  bool report_special{false};
+  std::vector<bool> others_locked;
+  std::vector<bool> others_reported;
+};
+
+bool DecodeC2S_SssArrange(const uint8_t* data, size_t len, std::vector<int32_t>& head, std::vector<int32_t>& mid,
+                          std::vector<int32_t>& tail, bool& report_special, bool& confirm);
+
+std::vector<uint8_t> EncodeS2C_SssGameStart(const SssGameStartData& data);
+std::vector<uint8_t> EncodeS2C_SssArrangeState(const SssArrangeStateData& data);
+std::vector<uint8_t> EncodeS2C_SssArrangeAck(int32_t code, const std::string& message, bool locked);
+std::vector<uint8_t> EncodeS2C_SssCompare(const SssCompareData& data);
+std::vector<uint8_t> EncodeS2C_SssSettle(const SssSettleData& data);
+std::vector<uint8_t> EncodeS2C_SssSnapshot(const SssSnapshotData& data);
+
 }  // namespace proto_wire
 }  // namespace pandora

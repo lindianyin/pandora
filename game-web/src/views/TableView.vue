@@ -64,7 +64,7 @@ function face(id: number) {
         <h1>斗地主</h1>
         <p>
           {{ nickname }} · 金币 {{ gold }} · 房间 #{{ roomId || '-' }}
-          <span v-if="ddzRoundId"> · 局 {{ ddzRoundId }}</span>
+          · 局号 {{ ddzRoundId || '-' }}
           · {{ roomPhase || turnPhase || '-' }}
           · WSS {{ wsOk ? '已连接' : '断开' }}
         </p>
@@ -175,9 +175,9 @@ function face(id: number) {
       </div>
     </div>
 
-    <details class="log-box">
-      <summary>日志</summary>
-      <pre>{{ logs.join('\n') }}</pre>
+    <details class="log-box" open>
+      <summary>调试日志</summary>
+      <pre>{{ logs.join('\n') || '（暂无）' }}</pre>
     </details>
 
     <div v-if="showSettle && settle" class="modal-mask">

@@ -71,6 +71,17 @@ const router = createRouter({
       component: () => import('./views/BijiLabView.vue'),
     },
     {
+      path: '/sss',
+      name: 'sss',
+      component: () => import('./views/SssTableView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/sss-lab',
+      name: 'sss-lab',
+      component: () => import('./views/SssLabView.vue'),
+    },
+    {
       path: '/wallet',
       name: 'wallet',
       component: () => import('./views/WalletView.vue'),
