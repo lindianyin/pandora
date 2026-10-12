@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import FishCannon from '../components/FishCannon.vue'
 import { labTopupGold } from '../api'
 import { GameSocket } from '../net/GameSocket'
 import {
-  FISH_SEAT_CANNON_POS,
-  fishCannonAngle,
-  fishCannonAngleFromVel,
-  fishSeatIsTop,
   fishVisual,
   type FishSeatInfo,
   type FishSnap,
@@ -24,8 +19,7 @@ const mult = ref(1)
 const mults = ref([1, 2, 5, 10])
 const fishList = ref<FishSnap[]>([])
 const fishSeats = ref<FishSeatInfo[]>([])
-const cannonAngles = ref<number[]>([0, 0, 180, 180])
-const firingSeat = ref(-1)
+const bullets = ref<{ id: number; x: number; y: number; vx: number; vy: number }[]>([])
 const logs = ref<string[]>([])
 const roundId = ref(0)
 const roomId = ref(Number(route.query.room_id) || 0)
@@ -41,7 +35,6 @@ let sock: GameSocket | null = null
 /** Last used fire client_seq; resume from server last_client_seq after reconnect. */
 let seq = 0
 let anim: number | null = null
-let fireFlashTimer: number | null = null
 
 function noteFireSeq(v: number) {
   if (v > seq) seq = v
@@ -65,26 +58,6 @@ const statusText = computed(() => {
   return '移动瞄准，点击渔场开火'
 })
 
-const cannons = computed(() =>
-  [0, 1, 2, 3].map((seat) => {
-    const pos = FISH_SEAT_CANNON_POS[seat]!
-    const info = fishSeats.value.find((s) => s.seat_id === seat)
-    const isMe = seat === mySeat.value
-    return {
-      seat,
-      leftPct: (pos.x / 1920) * 100,
-      bottomPct: (pos.y / 1080) * 100,
-      angle: cannonAngles.value[seat] ?? (fishSeatIsTop(seat) ? 180 : 0),
-      mult: isMe ? mult.value : info?.cannon_mult || 1,
-      nickname: info?.nickname || `座${seat}`,
-      me: isMe,
-      empty: !info || !info.uid,
-      firing: firingSeat.value === seat,
-      top: fishSeatIsTop(seat),
-    }
-  }),
-)
-
 function pushLog(line: string) {
   logs.value = [line, ...logs.value].slice(0, 30)
 }
@@ -98,20 +71,9 @@ function setFishSeat(s: FishSeatInfo) {
   fishSeats.value = [...rest, s].sort((a, b) => a.seat_id - b.seat_id)
 }
 
-function aimSeat(seat: number, ax: number, ay: number) {
-  const pos = FISH_SEAT_CANNON_POS[seat]
-  if (!pos) return
-  const next = cannonAngles.value.slice()
-  next[seat] = fishCannonAngle(pos.x, pos.y, ax, ay)
-  cannonAngles.value = next
-}
-
-function flashFire(seat: number) {
-  firingSeat.value = seat
-  if (fireFlashTimer != null) clearTimeout(fireFlashTimer)
-  fireFlashTimer = window.setTimeout(() => {
-    if (firingSeat.value === seat) firingSeat.value = -1
-  }, 140)
+function removeBullet(bulletId: number) {
+  if (bulletId <= 0) return
+  bullets.value = bullets.value.filter((b) => b.id !== bulletId)
 }
 
 function pondPoint(ev: MouseEvent) {
@@ -160,6 +122,7 @@ onMounted(() => {
       mult.value = mults.value[0] || 1
       fishList.value = g.fish
       fishSeats.value = [...g.seats]
+      bullets.value = []
       const me = g.seats.find((s) => s.seat_id === g.self_seat)
       if (me) {
         gold.value = me.gold
@@ -190,10 +153,6 @@ onMounted(() => {
         gold.value = f.gold
         noteFireSeq(f.client_seq || 0)
       }
-      const next = cannonAngles.value.slice()
-      next[f.seat_id] = fishCannonAngleFromVel(f.vx, f.vy)
-      cannonAngles.value = next
-      flashFire(f.seat_id)
       const info = fishSeats.value.find((s) => s.seat_id === f.seat_id)
       if (info) {
         setFishSeat({
@@ -203,6 +162,16 @@ onMounted(() => {
           last_client_seq: Math.max(info.last_client_seq || 0, f.client_seq || 0),
         })
       }
+      bullets.value = [
+        ...bullets.value,
+        { id: f.bullet_id, x: f.x, y: f.y, vx: f.vx, vy: f.vy },
+      ].slice(-40)
+    },
+    onFishHit: (h) => {
+      removeBullet(h.bullet_id)
+      fishList.value = fishList.value.map((f) =>
+        f.fish_id === h.fish_id ? { ...f, hp: h.hp, hp_max: h.hp_max } : f,
+      )
     },
     onFishCatch: (c) => {
       fishList.value = fishList.value.filter((f) => f.fish_id !== c.fish_id)
@@ -221,12 +190,14 @@ onMounted(() => {
       x: f.x + f.vx * dt,
       y: f.y + f.vy * dt,
     }))
+    bullets.value = bullets.value
+      .map((b) => ({ ...b, x: b.x + b.vx * dt, y: b.y + b.vy * dt }))
+      .filter((b) => b.x > -100 && b.x < 2100 && b.y > -100 && b.y < 1200)
   }, 50)
 })
 
 onUnmounted(() => {
   if (anim != null) clearInterval(anim)
-  if (fireFlashTimer != null) clearTimeout(fireFlashTimer)
   sock?.close()
 })
 
@@ -255,11 +226,10 @@ async function topupGold() {
 }
 
 function onPondMove(ev: MouseEvent) {
-  if (!roundId.value || mySeat.value < 0) return
+  if (!roundId.value) return
   const p = pondPoint(ev)
   aimX.value = p.x
   aimY.value = p.y
-  aimSeat(mySeat.value, p.x, p.y)
 }
 
 function onPondClick(ev: MouseEvent) {
@@ -267,7 +237,6 @@ function onPondClick(ev: MouseEvent) {
   const p = pondPoint(ev)
   aimX.value = p.x
   aimY.value = p.y
-  if (mySeat.value >= 0) aimSeat(mySeat.value, p.x, p.y)
   sock?.fishFire(mult.value, aimX.value, aimY.value, nextFireSeq())
 }
 
@@ -290,7 +259,7 @@ function oneClickLeave() {
   }
   fishList.value = []
   fishSeats.value = []
-  cannonAngles.value = [0, 0, 180, 180]
+  bullets.value = []
   roomId.value = 0
   roundId.value = 0
   roomPhase.value = ''
@@ -362,18 +331,11 @@ function backLobby() {
         <span class="fin" />
         <span class="tag">{{ face(f).label }}</span>
       </div>
-      <FishCannon
-        v-for="c in cannons"
-        :key="'c' + c.seat"
-        :left-pct="c.leftPct"
-        :bottom-pct="c.bottomPct"
-        :angle="c.angle"
-        :mult="c.mult"
-        :nickname="c.nickname"
-        :me="c.me"
-        :firing="c.firing"
-        :empty="c.empty"
-        :top="c.top"
+      <div
+        v-for="b in bullets"
+        :key="b.id"
+        class="bullet"
+        :style="{ left: (b.x / 1920) * 100 + '%', bottom: (b.y / 1080) * 100 + '%' }"
       />
       <div
         class="cross"
@@ -553,6 +515,17 @@ function backLobby() {
   color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
   text-shadow: 0 1px 2px #000;
+  pointer-events: none;
+}
+.bullet {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #fff8c8;
+  border-radius: 50%;
+  box-shadow: 0 0 8px #ffe08a;
+  transform: translate(-50%, 50%);
+  z-index: 4;
   pointer-events: none;
 }
 .cross {

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, shallowRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import FishCannon from '../components/FishCannon.vue'
 import { createFishLabClient } from '../composables/createFishLabClient'
 import { fishVisual } from '../net/frame'
 
@@ -158,19 +157,6 @@ onMounted(() => {
             <span class="eye" />
             <span class="fin" />
           </div>
-          <FishCannon
-            v-for="cn in c.cannons.value"
-            :key="'c' + cn.seat"
-            :left-pct="cn.leftPct"
-            :bottom-pct="cn.bottomPct"
-            :angle="cn.angle"
-            :mult="cn.mult"
-            :nickname="cn.nickname"
-            :me="cn.me"
-            :firing="cn.firing"
-            :empty="cn.empty"
-            :top="cn.top"
-          />
           <div
             v-for="b in c.bullets.value"
             :key="b.id"
